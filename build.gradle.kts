@@ -46,10 +46,13 @@ gradlePlugin {
     }
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
+// Ensure NMCP is configured AFTER all plugins have registered their publications
+afterEvaluate {
+    publishing {
+        publications.withType<MavenPublication>().configureEach {
+            if (name == "pluginMaven") {
+                artifactId = "gradle-lib-insight"
+            }
             
             pom {
                 name.set("Library Insight Plugin")
@@ -79,13 +82,12 @@ publishing {
             }
         }
     }
-}
 
-// Modern Maven Central Publishing (New Portal)
-nmcp {
-    publish("maven") {
-        username.set(System.getenv("OSSRH_USERNAME"))
-        password.set(System.getenv("OSSRH_PASSWORD"))
+    nmcp {
+        publish("pluginMaven") {
+            username.set(System.getenv("OSSRH_USERNAME"))
+            password.set(System.getenv("OSSRH_PASSWORD"))
+        }
     }
 }
 
@@ -97,7 +99,7 @@ signing {
 
     if (!key.isNullOrBlank()) {
         useInMemoryPgpKeys(key, password ?: "")
-        sign(publishing.publications["maven"])
+        sign(publishing.publications)
     }
 }
 
