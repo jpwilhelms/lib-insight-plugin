@@ -82,7 +82,8 @@ abstract class LibInsightReportTask : DefaultTask() {
         val relevant = items.mapNotNull { item ->
             val levelFindings = item.findings.filter { it.level == level && it.console }
             if (levelFindings.isNotEmpty()) {
-                item.metric.id to levelFindings
+                val fullCoords = "${item.metric.id}:${item.metric.version}"
+                fullCoords to levelFindings
             } else null
         }
 
@@ -90,8 +91,8 @@ abstract class LibInsightReportTask : DefaultTask() {
             println("\n==========================================================================================")
             println(" $title ")
             println("==========================================================================================")
-            relevant.forEach { (id, findings) ->
-                println(id)
+            relevant.forEach { (coords, findings) ->
+                println(coords)
                 findings.forEach { finding ->
                     println("  - [${finding.type}] ${finding.message}")
                 }
