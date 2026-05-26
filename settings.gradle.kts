@@ -1,1 +1,1 @@
-rootProject.name = "lib-insight-plugin"
+rootProject.name = "gradle-lib-insight"

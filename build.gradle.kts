@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "dev.wilhelms.gradle"
-version = project.findProperty("version")?.toString() ?: "0.1.0-SNAPSHOT"
+version = project.findProperty("version")?.takeIf { it != "unspecified" } ?: "0.1.0-SNAPSHOT"
 
 repositories {
     mavenLocal()
@@ -50,7 +50,6 @@ publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            artifactId = "gradle-lib-insight"
             
             pom {
                 name.set("Library Insight Plugin")
@@ -94,12 +93,11 @@ signing {
     val key = System.getenv("GPG_PRIVATE_KEY")
     val password = System.getenv("GPG_PASSPHRASE")
     
-    // Only require signing if a key is provided (CI)
     setRequired({ !key.isNullOrBlank() })
 
     if (!key.isNullOrBlank()) {
         useInMemoryPgpKeys(key, password ?: "")
-        sign(publishing.publications)
+        sign(publishing.publications["maven"])
     }
 }
 
