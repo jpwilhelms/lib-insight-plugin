@@ -68,6 +68,14 @@ libInsight {
             }
             format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
         }
+
+        // 5. Niche Library Warning (using Libraries.io)
+        create("nicheLibrary") {
+            description = "Flags libraries with very low adoption"
+            level = "WARN"
+            filter { it.librariesIo != null && it.librariesIo.dependentReposCount < 5 }
+            format { "Niche Library: Only ${it.librariesIo.dependentReposCount} other repositories depend on this." }
+        }
     }
 }
 ```
