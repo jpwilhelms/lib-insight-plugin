@@ -67,7 +67,6 @@ class LibrariesIoService(private val ctx: ServiceContext) {
                 dependentsCount = json.get("dependents_count").safeInt() ?: 0,
                 dependentReposCount = json.get("dependent_repos_count").safeInt() ?: 0,
                 sourcerank = json.get("rank").safeInt() ?: 0,
-                averageReleaseFrequency = null,
                 sourcerankBreakdown = breakdown
             )
         } catch (e: Exception) { return null }

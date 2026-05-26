@@ -5,7 +5,6 @@ import org.gradle.api.Project
 import org.gradle.api.Action
 import org.gradle.api.Task
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import java.io.File
 
 class LibInsightPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -16,8 +15,8 @@ class LibInsightPlugin : Plugin<Project> {
         extension.librariesIoToken.convention(project.providers.environmentVariable("LIBRARIES_IO_TOKEN"))
         extension.htmlReport.convention(true)
         extension.jsonReport.convention(true)
-        extension.autoCheck.convention(false)
         extension.maxParallelDownloads.convention(10)
+        extension.asyncTimeoutMinutes.convention(30)
 
         // Set cacheDir convention from environment variable or default to user home
         val envCacheDirVar = project.providers.environmentVariable("LIB_INSIGHT_CACHE_DIR")
@@ -34,6 +33,7 @@ class LibInsightPlugin : Plugin<Project> {
                 task.gitHubToken.set(extension.gitHubToken)
                 task.librariesIoToken.set(extension.librariesIoToken)
                 task.maxParallel.set(extension.maxParallelDownloads)
+                task.timeoutMinutes.set(extension.asyncTimeoutMinutes)
                 task.dataDir.set(project.layout.buildDirectory.dir("lib-insight/data"))
                 task.cacheDir.set(extension.cacheDir)
                 task.cacheTtlDays.set(extension.cacheTtlDays.convention(1))
@@ -88,11 +88,11 @@ class LibInsightPlugin : Plugin<Project> {
             }
         })
 
-        // Lifecycle task (Governance)
+        // Stage 3: CI/CD Gate
         project.tasks.register("libInsightCheck", object : Action<Task> {
             override fun execute(task: Task) {
                 task.group = "insight"
-                task.description = "Runs analysis and checks findings."
+                task.description = "Runs analysis and fails the build if any critical findings (ERROR) exist."
                 task.dependsOn(collectTask)
                 task.dependsOn(reportTask)
                 
@@ -104,7 +104,6 @@ class LibInsightPlugin : Plugin<Project> {
                         val items: List<ReportItem> = gson.fromJson(reportFile.readText(), type)
                         
                         if (items.isNotEmpty()) {
-                            // FAIL ONLY if any finding has level == "ERROR"
                             val hasCritical = items.any { item -> item.findings.any { f -> f.level == "ERROR" } }
                             if (hasCritical) {
                                 throw org.gradle.api.GradleException("Library Insight found CRITICAL issues. Check the report at: ${reportFile.parentFile.absolutePath}/index.html")

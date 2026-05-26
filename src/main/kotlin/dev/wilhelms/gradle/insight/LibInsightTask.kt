@@ -32,6 +32,9 @@ abstract class LibInsightTask : DefaultTask() {
     @get:Input
     abstract val maxParallel: Property<Int>
 
+    @get:Input
+    abstract val timeoutMinutes: Property<Int>
+
     @get:Internal
     abstract val cacheDir: DirectoryProperty
 
@@ -86,7 +89,7 @@ abstract class LibInsightTask : DefaultTask() {
         
         val completedCount = AtomicInteger(0)
 
-        // Broad Async Execution: Plan all libraries as futures
+        // Broad Async Execution
         val allMetricsFutures = dependencies.entries.map { (gav, isDirectDep) ->
             val parts = gav.split(":")
             val id = object : ModuleComponentIdentifier {
@@ -100,7 +103,6 @@ abstract class LibInsightTask : DefaultTask() {
                 }
             }
 
-            // Orchestrate the chain for one library
             analyzeWithCacheAsync(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions)
                 .thenApply { metric ->
                     val current = completedCount.incrementAndGet()
@@ -109,10 +111,10 @@ abstract class LibInsightTask : DefaultTask() {
                 }
         }
 
-        // Wait for all futures to complete
+        // Wait for all futures with configurable timeout
         val metrics = CompletableFuture.allOf(*allMetricsFutures.toTypedArray())
             .thenApply { _ -> allMetricsFutures.map { it.get() } }
-            .get(30, TimeUnit.MINUTES)
+            .get(timeoutMinutes.get().toLong(), TimeUnit.MINUTES)
         
         progress.completed()
 
@@ -144,13 +146,10 @@ abstract class LibInsightTask : DefaultTask() {
         val dir = File(baseDir, "v$CACHE_VERSION/${id.group}/${id.module}/${id.version}")
         dir.mkdirs()
 
-        // 1. Initial POM & SCM URL (Still mostly sequential/cached)
         val pomFile = findInheritedPom(id, pomCache)
         val scmUrl = extractScmUrl(pomFile, id)
         val license = pomFile?.let { extractLicense(it) }
 
-        // 2. Schedule all provider fetches in parallel
-        
         // Maven Central
         val mcFile = File(dir, "maven.json")
         val mcFuture = if (isFresh(mcFile)) {
@@ -221,7 +220,6 @@ abstract class LibInsightTask : DefaultTask() {
             }
         }
 
-        // 3. Combine everything into the final metric
         return CompletableFuture.allOf(mcFuture, ghFuture, ddFuture, liFuture).thenApply {
             val mcData = mcFuture.get()?.let { mcS.parse(it, id.version) }
             val ghData = ghFuture.get()?.let { ghS.parse(it) }
@@ -310,14 +308,12 @@ abstract class LibInsightTask : DefaultTask() {
         } catch (e: Exception) {}
         return null
     }
-
-    private fun isFresh(file: File): Boolean {
-        if (!file.exists()) return false
-        val ttl = cacheTtlDays.getOrElse(1).toLong()
-        if (ttl < 0) return true
-        val expiry = Instant.now().minus(ttl, java.time.temporal.ChronoUnit.DAYS)
-        return Instant.ofEpochMilli(file.lastModified()).isAfter(expiry)
-    }
+private fun isFresh(file: File): Boolean {
+    if (!file.exists()) return false
+    val ttl = cacheTtlDays.getOrElse(1).toLong()
+    val expiry = Instant.now().minus(ttl, java.time.temporal.ChronoUnit.DAYS)
+    return Instant.ofEpochMilli(file.lastModified()).isAfter(expiry)
+}
 
     private fun generateDataFile(metrics: List<LibMetric>) {
         val dataFile = dataDir.file("lib-insight.json").get().asFile

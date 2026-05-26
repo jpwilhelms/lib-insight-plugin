@@ -30,9 +30,9 @@ abstract class LibInsightExtension {
     // Global Report Settings
     abstract val htmlReport: Property<Boolean>
     abstract val jsonReport: Property<Boolean>
-    abstract val autoCheck: Property<Boolean>
 
     abstract val maxParallelDownloads: Property<Int>
+    abstract val asyncTimeoutMinutes: Property<Int>
 
     abstract val customAudits: NamedDomainObjectContainer<CustomAuditConfiguration>
     
@@ -191,7 +191,6 @@ data class LibrariesIoData(
     val sourcerank: Int,
     val dependentReposCount: Int,
     val dependentsCount: Int,
-    val averageReleaseFrequency: Double?,
     val sourcerankBreakdown: Map<String, Int> = emptyMap()
 ) : Serializable
 
