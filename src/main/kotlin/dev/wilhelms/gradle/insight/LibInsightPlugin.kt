@@ -28,7 +28,7 @@ class LibInsightPlugin : Plugin<Project> {
 
         // Stage 1: Data Collection (Internal)
         val collectTask = project.tasks.register("libInsight", LibInsightTask::class.java) {
-            description = "Analyzes all project dependencies and collects metrics."
+            description = "Analyzes project dependencies and collects metrics."
             gitHubToken.set(extension.gitHubToken)
             librariesIoToken.set(extension.librariesIoToken)
             maxParallel.set(extension.maxParallelDownloads)
@@ -46,24 +46,21 @@ class LibInsightPlugin : Plugin<Project> {
 
             dependencyData.set(project.provider {
                 val dataMap = mutableMapOf<String, Boolean>()
-                // Try multiple common configurations
-                listOf("runtimeClasspath", "compileClasspath", "default").forEach { configName ->
-                    project.configurations.findByName(configName)?.let { config ->
-                        if (config.isCanBeResolved) {
-                            try {
-                                val result = config.incoming.resolutionResult
-                                val rootId = result.root.id
-                                result.allComponents.forEach { component ->
-                                    val id = component.id
-                                    if (id is ModuleComponentIdentifier) {
-                                        val gav = "${id.group}:${id.module}:${id.version}"
-                                        val isDirectDependency = component.dependents.any { it.from.id == rootId }
-                                        dataMap[gav] = isDirectDependency
-                                    }
+                project.configurations.findByName("runtimeClasspath")?.let { config ->
+                    if (config.isCanBeResolved) {
+                        try {
+                            val result = config.incoming.resolutionResult
+                            val rootId = result.root.id
+                            result.allComponents.forEach { component ->
+                                val id = component.id
+                                if (id is ModuleComponentIdentifier) {
+                                    val gav = "${id.group}:${id.module}:${id.version}"
+                                    val isDirectDependency = component.dependents.any { it.from.id == rootId }
+                                    dataMap[gav] = isDirectDependency
                                 }
-                            } catch (e: Exception) {
-                                // Ignore resolution errors for individual configs
                             }
+                        } catch (e: Exception) {
+                            // Ignore resolution errors
                         }
                     }
                 }

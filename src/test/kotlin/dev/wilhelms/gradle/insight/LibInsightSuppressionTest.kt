@@ -39,10 +39,10 @@ class LibInsightSuppressionTest {
                 mavenCentral()
             }
             dependencies {
-                api name: 'dummy-lib', group: 'com.github.tester', version: '1.0.0'
+                implementation group: 'com.github.tester', name: 'dummy-lib', version: '1.0.0'
             }
             libInsight {
-                cacheDir = file(".gradle/lib-insight-cache")
+                cacheDir = file("test-cache")
                 suppressionFile = file("suppressions.json")
                 customAudits {
                     create("securityRisk") {
@@ -60,7 +60,7 @@ class LibInsightSuppressionTest {
         """.trimIndent())
 
         // Setup cache data to trigger findings
-        val cacheDir = testProjectDir.resolve(".gradle/lib-insight-cache/v1/com.github.tester/dummy-lib/1.0.0")
+        val cacheDir = testProjectDir.resolve("test-cache/v1/com.github.tester/dummy-lib/1.0.0")
         cacheDir.mkdirs()
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 10}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")

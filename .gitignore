@@ -16,3 +16,4 @@ gradle-8.5/
 # OS
 .DS_Store
 Thumbs.db
+test_output.txt

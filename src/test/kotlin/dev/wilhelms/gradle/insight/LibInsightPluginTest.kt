@@ -55,10 +55,10 @@ class LibInsightPluginTest {
                 mavenCentral()
             }
             dependencies {
-                api name: 'dummy-lib', group: 'com.github.tester', version: '1.0.0'
+                implementation group: 'com.github.tester', name: 'dummy-lib', version: '1.0.0'
             }
             libInsight {
-                cacheDir = file(".gradle/lib-insight-cache")
+                cacheDir = file("test-cache")
                 customAudits {
                     create("securityRisk") {
                         level = "ERROR"
@@ -74,7 +74,7 @@ class LibInsightPluginTest {
             }
         """.trimIndent())
 
-        val cacheDir = testProjectDir.resolve(".gradle/lib-insight-cache/v1/com.github.tester/dummy-lib/1.0.0")
+        val cacheDir = testProjectDir.resolve("test-cache/v1/com.github.tester/dummy-lib/1.0.0")
         cacheDir.mkdirs()
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1000}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")
@@ -108,10 +108,10 @@ class LibInsightPluginTest {
                 mavenCentral()
             }
             dependencies {
-                api("com.github.tester:dummy-lib:1.0.0")
+                implementation("com.github.tester:dummy-lib:1.0.0")
             }
             libInsight {
-                cacheDir.set(file(".gradle/lib-insight-cache"))
+                cacheDir.set(file("test-cache"))
                 customAudits {
                     create("securityRisk") {
                         level.set("ERROR")
@@ -122,7 +122,7 @@ class LibInsightPluginTest {
             }
         """.trimIndent())
 
-        val cacheDir = testProjectDir.resolve(".gradle/lib-insight-cache/v1/com.github.tester/dummy-lib/1.0.0")
+        val cacheDir = testProjectDir.resolve("test-cache/v1/com.github.tester/dummy-lib/1.0.0")
         cacheDir.mkdirs()
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1000}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")
@@ -154,10 +154,10 @@ class LibInsightPluginTest {
                 mavenCentral()
             }
             dependencies {
-                api name: 'dummy-lib', group: 'com.github.tester', version: '1.0.0'
+                implementation group: 'com.github.tester', name: 'dummy-lib', version: '1.0.0'
             }
             libInsight {
-                cacheDir = file(".gradle/lib-insight-cache")
+                cacheDir = file("test-cache")
                 customAudits {
                     create("outdated") {
                         level = "ERROR"
@@ -168,7 +168,7 @@ class LibInsightPluginTest {
             }
         """.trimIndent())
 
-        val cacheDir = testProjectDir.resolve(".gradle/lib-insight-cache/v1/com.github.tester/dummy-lib/1.0.0")
+        val cacheDir = testProjectDir.resolve("test-cache/v1/com.github.tester/dummy-lib/1.0.0")
         cacheDir.mkdirs()
         cacheDir.resolve("maven.json").writeText("""
             {
