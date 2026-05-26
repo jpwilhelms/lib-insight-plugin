@@ -21,6 +21,52 @@ class LibInsightPluginTest {
         File(libsDir, "dummy-lib-1.0.0.jar").writeBytes(byteArrayOf())
     }
 
+    private fun setupLocalMavenArtifact(group: String, artifact: String, version: String, dependency: String? = null) {
+        val repoBase = testProjectDir.resolve("local-m2/${group.replace('.', '/')}/$artifact/$version")
+        repoBase.mkdirs()
+        File(repoBase, "$artifact-$version.jar").writeBytes(byteArrayOf())
+        val dependencyXml = dependency?.let {
+            val parts = it.split(":")
+            """
+              <dependencies>
+                <dependency>
+                  <groupId>${parts[0]}</groupId>
+                  <artifactId>${parts[1]}</artifactId>
+                  <version>${parts[2]}</version>
+                </dependency>
+              </dependencies>
+            """.trimIndent()
+        } ?: ""
+        File(repoBase, "$artifact-$version.pom").writeText("""
+            <project>
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>$group</groupId>
+              <artifactId>$artifact</artifactId>
+              <version>$version</version>
+              $dependencyXml
+            </project>
+        """.trimIndent())
+    }
+
+    private fun writeAnalysisCache(group: String = "com.github.tester", artifact: String = "dummy-lib", version: String = "1.0.0") {
+        val cacheDir = testProjectDir.resolve("test-cache/v1/$group/$artifact/$version")
+        cacheDir.mkdirs()
+        cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1}""")
+        cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": []}""")
+        cacheDir.resolve("libsio_api.json").writeText("""{"dependents_count": 1, "dependent_repos_count": 1, "rank": 1}""")
+        cacheDir.resolve("maven.json").writeText("""{"response":{"docs":[{"v":"1.0.0","timestamp":123}]}}""")
+        val pomCache = testProjectDir.resolve("test-cache/poms/$group/$artifact/$version.pom")
+        pomCache.parentFile.mkdirs()
+        pomCache.writeText("""
+            <project>
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>$group</groupId>
+              <artifactId>$artifact</artifactId>
+              <version>$version</version>
+            </project>
+        """.trimIndent())
+    }
+
     @Test
     fun `plugin can be applied in Kotlin`() {
         settingsFile.writeText("rootProject.name = \"test-project\"")
@@ -79,6 +125,8 @@ class LibInsightPluginTest {
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1000}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")
         cacheDir.resolve("github_repo.json").writeText("""{"full_name": "tester/dummy-lib", "stargazers_count": 10, "fork": false}""")
+        cacheDir.resolve("github_issues_open.json").writeText("""{"total_count": 1}""")
+        cacheDir.resolve("github_issues_closed.json").writeText("""{"total_count": 9}""")
         cacheDir.resolve("maven.json").writeText("""{"response":{"docs":[{"v":"1.0.0","timestamp":123}]}}""")
 
         val result = GradleRunner.create()
@@ -91,6 +139,109 @@ class LibInsightPluginTest {
         assertTrue(result.output.contains("Library Insight found CRITICAL issues"), "Should fail due to securityRisk (ERROR level)")
         assertTrue(result.output.contains("[securityRisk]"), "Should show securityRisk finding")
         assertTrue(result.output.contains("[lowTrust]"), "Should show lowTrust finding")
+    }
+
+    @Test
+    fun `direct dependencies from subprojects are treated as direct`() {
+        val s = "$"
+        setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0")
+        writeAnalysisCache()
+        settingsFile.writeText("""
+            rootProject.name = "multi-module-direct-test"
+            include("lib")
+        """.trimIndent())
+        buildFileGroovy.writeText("""
+            plugins {
+                id "dev.wilhelms.gradle.lib-insight"
+            }
+            allprojects {
+                repositories {
+                    maven { url = uri(rootProject.file("local-m2")) }
+                    mavenCentral()
+                }
+            }
+            libInsight {
+                cacheDir = file("test-cache")
+                customAudits {
+                    create("directInSubproject") {
+                        level = "ERROR"
+                        filter { it.isDirect && it.id == "com.github.tester:dummy-lib" }
+                        format { "Direct dependency found: ${s}{it.id}" }
+                    }
+                }
+            }
+        """.trimIndent())
+        testProjectDir.resolve("lib").mkdirs()
+        testProjectDir.resolve("lib/build.gradle").writeText("""
+            plugins {
+                id "java-library"
+            }
+            dependencies {
+                implementation "com.github.tester:dummy-lib:1.0.0"
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create()
+            .withProjectDir(testProjectDir)
+            .withArguments("libInsightCheck", "--info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .buildAndFail()
+
+        assertTrue(result.output.contains("[directInSubproject]"), "Should treat subproject dependency as direct")
+        assertTrue(result.output.contains("Direct dependency found: com.github.tester:dummy-lib"), "Should show the direct finding message")
+    }
+
+    @Test
+    fun `transitive dependencies from subprojects are not treated as direct`() {
+        val s = "$"
+        setupLocalMavenArtifact("com.github.tester", "transitive-lib", "1.0.0")
+        setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0", "com.github.tester:transitive-lib:1.0.0")
+        writeAnalysisCache("com.github.tester", "dummy-lib", "1.0.0")
+        writeAnalysisCache("com.github.tester", "transitive-lib", "1.0.0")
+        settingsFile.writeText("""
+            rootProject.name = "multi-module-transitive-test"
+            include("lib")
+        """.trimIndent())
+        buildFileGroovy.writeText("""
+            plugins {
+                id "dev.wilhelms.gradle.lib-insight"
+            }
+            allprojects {
+                repositories {
+                    maven { url = uri(rootProject.file("local-m2")) }
+                    mavenCentral()
+                }
+            }
+            libInsight {
+                cacheDir = file("test-cache")
+                customAudits {
+                    create("transitiveOnly") {
+                        level = "ERROR"
+                        filter { it.isDirect && it.id == "com.github.tester:transitive-lib" }
+                        format { "Should not happen: ${s}{it.id}" }
+                    }
+                }
+            }
+        """.trimIndent())
+        testProjectDir.resolve("lib").mkdirs()
+        testProjectDir.resolve("lib/build.gradle").writeText("""
+            plugins {
+                id "java-library"
+            }
+            dependencies {
+                implementation "com.github.tester:dummy-lib:1.0.0"
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create()
+            .withProjectDir(testProjectDir)
+            .withArguments("libInsightCheck", "--info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        assertTrue(!result.output.contains("[transitiveOnly]"), "Transitive dependency must not be marked direct")
     }
 
     @Test
@@ -191,4 +342,5 @@ class LibInsightPluginTest {
         assertTrue(result.output.contains("[outdated]"), "Should find outdated version")
         assertTrue(result.output.contains("Outdated: 1.0.0 < 2.0.0"), "Should show correct format")
     }
+
 }

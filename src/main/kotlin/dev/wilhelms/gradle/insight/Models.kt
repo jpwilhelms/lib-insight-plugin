@@ -9,6 +9,8 @@ import org.gradle.api.Action
 import java.io.Serializable
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 // --- JSON Helpers ---
 
@@ -105,6 +107,17 @@ data class Suppression(
     val until: String? = null,
     val tasks: List<String>? = null
 ) : Serializable
+
+fun Suppression.isActive(now: Instant = Instant.now()): Boolean {
+    val untilValue = until?.trim().orEmpty()
+    if (untilValue.isEmpty()) return true
+
+    val untilInstant = runCatching { Instant.parse(untilValue) }.getOrElse {
+        runCatching { LocalDate.parse(untilValue).atStartOfDay().toInstant(ZoneOffset.UTC) }.getOrNull()
+    } ?: return true
+
+    return now.isBefore(untilInstant)
+}
 
 data class PomInfo(
     val url: String,

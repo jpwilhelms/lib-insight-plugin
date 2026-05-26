@@ -2,8 +2,6 @@ package dev.wilhelms.gradle.insight
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.Action
-import org.gradle.api.Task
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 
 class LibInsightPlugin : Plugin<Project> {
@@ -38,7 +36,7 @@ class LibInsightPlugin : Plugin<Project> {
             cacheTtlDays.set(extension.cacheTtlDays.convention(1))
             suppressionFile.set(extension.suppressionFile)
             
-            // Track build files for reliable incremental builds ONLY if they exist
+            // Track build files for reliable incremental builds
             val buildFile = project.buildFile
             if (buildFile.exists()) {
                 inputs.file(buildFile).withPropertyName("buildScript").optional()
@@ -51,26 +49,7 @@ class LibInsightPlugin : Plugin<Project> {
             }
 
             dependencyData.set(project.provider {
-                val dataMap = mutableMapOf<String, Boolean>()
-                project.configurations.findByName("runtimeClasspath")?.let { config ->
-                    if (config.isCanBeResolved) {
-                        try {
-                            val result = config.incoming.resolutionResult
-                            val rootId = result.root.id
-                            result.allComponents.forEach { component ->
-                                val id = component.id
-                                if (id is ModuleComponentIdentifier) {
-                                    val gav = "${id.group}:${id.module}:${id.version}"
-                                    val isDirectDependency = component.dependents.any { it.from.id == rootId }
-                                    dataMap[gav] = isDirectDependency
-                                }
-                            }
-                        } catch (e: Exception) {
-                            // Ignore resolution errors
-                        }
-                    }
-                }
-                dataMap
+                collectDependencyData(project)
             })
         }
 
@@ -80,6 +59,8 @@ class LibInsightPlugin : Plugin<Project> {
             description = "Generates finding-based HTML and JSON reports."
             dataFile.set(collectTask.flatMap { it.dataDir.file("lib-insight.json") })
             reportDir.set(project.layout.buildDirectory.dir("reports/lib-insight"))
+            htmlReport.set(extension.htmlReport)
+            jsonReport.set(extension.jsonReport)
 
             customAudits.set(project.provider {
                 extension.customAudits.filter { it.enabled.getOrElse(true) }.map { config ->
@@ -93,6 +74,8 @@ class LibInsightPlugin : Plugin<Project> {
                     "${it.name}:${it.level.get()}:${it.console.get()}:${it.description.getOrElse("")}"
                 }
             })
+
+            outputs.upToDateWhen { false }
         }
 
         // Stage 3: CI/CD Gate
@@ -100,20 +83,22 @@ class LibInsightPlugin : Plugin<Project> {
             group = "insight"
             description = "Runs analysis and fails the build if any critical findings (ERROR) exist."
             dependsOn(collectTask, reportTask)
-            
+
+            val checkDataFile = collectTask.flatMap { it.dataDir.file("lib-insight.json") }
+            val checkCustomAudits = project.provider {
+                extension.customAudits.filter { it.enabled.getOrElse(true) }.map { config ->
+                    CustomAuditInfo(config.name, config.level.getOrElse("ERROR"), config.console.getOrElse(true), config.filter.get(), config.formatter.get())
+                }
+            }
+
             doLast {
-                val reportFile = project.layout.buildDirectory.dir("reports/lib-insight/report.json").get().asFile
-                if (reportFile.exists()) {
-                    val gson = com.google.gson.Gson()
-                    val type = object : com.google.gson.reflect.TypeToken<List<ReportItem>>() {}.type
-                    val items: List<ReportItem> = gson.fromJson(reportFile.readText(), type)
-                    
-                    if (items.isNotEmpty()) {
-                        val hasCritical = items.any { item -> item.findings.any { f -> f.level == "ERROR" } }
-                        if (hasCritical) {
-                            throw org.gradle.api.GradleException("Library Insight found CRITICAL issues. Check the report at: ${reportFile.parentFile.absolutePath}/index.html")
-                        }
-                    }
+                val gson = com.google.gson.Gson()
+                val type = object : com.google.gson.reflect.TypeToken<List<LibMetric>>() {}.type
+                val metrics: List<LibMetric> = gson.fromJson(checkDataFile.get().asFile.readText(), type)
+                val items = LibInsightReportEngine.evaluate(metrics, checkCustomAudits.getOrElse(emptyList()))
+
+                if (items.any { item -> item.findings.any { f -> f.level == "ERROR" } }) {
+                    throw org.gradle.api.GradleException("Library Insight found CRITICAL issues. Check the report at: ${project.layout.buildDirectory.dir("reports/lib-insight/index.html").get().asFile.absolutePath}")
                 }
             }
         }
@@ -125,4 +110,33 @@ class LibInsightPlugin : Plugin<Project> {
             level.convention("ERROR")
         }
     }
+}
+
+private fun collectDependencyData(project: Project): Map<String, Boolean> {
+    val dataMap = mutableMapOf<String, Boolean>()
+    val scopeProjects = project.rootProject.allprojects
+
+    for (scopeProject in scopeProjects) {
+        for (configName in listOf("runtimeClasspath", "compileClasspath")) {
+            val config = scopeProject.configurations.findByName(configName) ?: continue
+            if (!config.isCanBeResolved) continue
+
+            try {
+                val result = config.incoming.resolutionResult
+                val rootId = result.root.id
+                result.allComponents.forEach { component ->
+                    val id = component.id
+                    if (id is ModuleComponentIdentifier) {
+                        val gav = "${id.group}:${id.module}:${id.version}"
+                        val isDirect = component.dependents.any { it.from.id == rootId }
+                        dataMap[gav] = dataMap.getOrDefault(gav, false) || isDirect
+                    }
+                }
+            } catch (_: Exception) {
+                // Ignore unresolved configurations from optional or partial subprojects.
+            }
+        }
+    }
+
+    return dataMap
 }

@@ -2,12 +2,12 @@ package dev.wilhelms.gradle.insight
 
 import java.io.File
 
-class HtmlReportGenerator {
+class HtmlReportGenerator(private val pluginVersion: String) {
 
     fun generate(reportItems: List<ReportItem>, outputFile: File) {
         val criticalItems = reportItems.filter { item -> item.findings.any { it.level == "ERROR" } }
-        val warningItems = reportItems.filter { item -> item.findings.all { it.level != "ERROR" } && item.findings.any { it.level == "WARN" } }
-        val infoItems = reportItems.filter { item -> item.findings.all { it.level == "INFO" } }
+        val warningItems = reportItems.filter { item -> item.findings.none { it.level == "ERROR" } && item.findings.any { it.level == "WARN" } }
+        val infoItems = reportItems.filter { item -> item.findings.none { it.level == "ERROR" } && item.findings.none { it.level == "WARN" } && item.findings.any { it.level == "INFO" } }
 
         val html = """
             <!DOCTYPE html>
@@ -121,7 +121,7 @@ class HtmlReportGenerator {
                     ${renderSection("Information", "info", "bg-info", "INFO", infoItems)}
 
                     <footer>
-                        Analyzed by Library Insight Gradle Plugin v1.0.0<br>
+                        Analyzed by Library Insight Gradle Plugin v${escapeHtml(pluginVersion)}<br>
                         <a href="https://github.com/jpwilhelms/lib-insight-plugin" style="color: inherit;">GitHub Repository</a>
                     </footer>
                 </div>
@@ -136,23 +136,23 @@ class HtmlReportGenerator {
         if (items.isEmpty()) return ""
         
         return """
-            <h2 id="$anchor" class="section-header $cssClass">$title</h2>
+            <h2 id="${escapeHtml(anchor)}" class="section-header ${escapeHtml(cssClass)}">${escapeHtml(title)}</h2>
             ${items.joinToString("\n") { item ->
                 """
-                <div class="dependency-card level-$level">
+                <div class="dependency-card level-${escapeHtml(level)}">
                     <div class="card-header">
-                        <h3>${item.metric.id}</h3>
+                        <h3>${escapeHtml(item.metric.id)}</h3>
                         <div class="metadata">
-                            <span>Version: <strong>${item.metric.version}</strong></span>
+                            <span>Version: <strong>${escapeHtml(item.metric.version)}</strong></span>
                             ${if (item.metric.isDirect) "<span class='tag'>Direct</span>" else "<span class='tag'>Transitive</span>"}
                         </div>
                     </div>
                     <div class="card-body">
-                        ${item.findings.filter { it.level == level || (level == "ERROR" && it.level == "ERROR") }.joinToString("\n") { finding ->
+                        ${item.findings.joinToString("\n") { finding ->
                             """
-                            <div class="finding finding-${finding.level}">
-                                <span class="finding-type">[${finding.type}]</span>
-                                <span class="finding-message">${finding.message}</span>
+                            <div class="finding finding-${escapeHtml(finding.level)}">
+                                <span class="finding-type">[${escapeHtml(finding.type)}]</span>
+                                <span class="finding-message">${escapeHtml(finding.message)}</span>
                             </div>
                             """
                         }}
@@ -161,5 +161,20 @@ class HtmlReportGenerator {
                 """
             }}
         """
+    }
+
+    private fun escapeHtml(input: String): String {
+        return buildString(input.length) {
+            input.forEach { ch ->
+                when (ch) {
+                    '&' -> append("&amp;")
+                    '<' -> append("&lt;")
+                    '>' -> append("&gt;")
+                    '"' -> append("&quot;")
+                    '\'' -> append("&#39;")
+                    else -> append(ch)
+                }
+            }
+        }
     }
 }

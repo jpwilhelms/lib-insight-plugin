@@ -28,62 +28,56 @@ class GitHubService(private val ctx: ServiceContext) {
     }
 
     fun parse(raw: GitHubRaw): GitHubData? {
-        try {
-            val element = JsonParser.parseString(raw.repoJson)
-            if (!element.isJsonObject) return null
-            val json = element.asJsonObject
-            
-            var totalIssues = 0
-            if (raw.issuesJson != null) {
-                val issuesElement = JsonParser.parseString(raw.issuesJson)
-                if (issuesElement.isJsonObject) {
-                    totalIssues = issuesElement.asJsonObject.get("total_count").safeInt() ?: 0
-                }
+        val element = JsonParser.parseString(raw.repoJson)
+        if (!element.isJsonObject) return null
+        val json = element.asJsonObject
+
+        val openIssues = raw.openIssuesJson?.let(::issueCountFromSearch) ?: 0
+        val closedIssues = raw.closedIssuesJson?.let(::issueCountFromSearch) ?: 0
+        val totalIssues = openIssues + closedIssues
+
+        var ahead: Int? = null
+        var behind: Int? = null
+        var parentName: String? = null
+        if (raw.compareJson != null) {
+            val compElement = JsonParser.parseString(raw.compareJson)
+            if (compElement.isJsonObject) {
+                val comp = compElement.asJsonObject
+                ahead = comp.get("ahead_by").safeInt()
+                behind = comp.get("behind_by").safeInt()
             }
+        }
 
-            var ahead: Int? = null
-            var behind: Int? = null
-            var parentName: String? = null
-            if (raw.compareJson != null) {
-                val compElement = JsonParser.parseString(raw.compareJson)
-                if (compElement.isJsonObject) {
-                    val comp = compElement.asJsonObject
-                    ahead = comp.get("ahead_by").safeInt()
-                    behind = comp.get("behind_by").safeInt()
-                }
-            }
+        if (json.get("fork").safeBoolean() == true) {
+            parentName = json.getAsJsonObject("parent")?.get("full_name").safeString()
+        }
 
-            if (json.get("fork").safeBoolean() == true) {
-                parentName = json.getAsJsonObject("parent")?.get("full_name").safeString()
-            }
+        val repo = GitHubRepo(
+            name = json.get("full_name").safeString() ?: "",
+            description = json.get("description").safeString(),
+            stargazersCount = json.get("stargazers_count").safeInt() ?: 0,
+            forksCount = json.get("forks_count").safeInt() ?: 0,
+            openIssuesCount = openIssues,
+            isFork = json.get("fork").safeBoolean() ?: false,
+            isArchived = json.get("archived").safeBoolean() ?: false,
+            createdAt = json.get("created_at").safeString(),
+            updatedAt = json.get("updated_at").safeString(),
+            pushedAt = json.get("pushed_at").safeString(),
+            license = json.get("license")?.let { if (it.isJsonObject) it.asJsonObject else null }?.get("spdx_id").safeString(),
+            topics = json.get("topics")?.asJsonArray?.map { it.safeString() ?: "" } ?: emptyList(),
+            parentRepo = parentName,
+            aheadBy = ahead,
+            behindBy = behind
+        )
 
-            val repo = GitHubRepo(
-                name = json.get("full_name").safeString() ?: "",
-                description = json.get("description").safeString(),
-                stargazersCount = json.get("stargazers_count").safeInt() ?: 0,
-                forksCount = json.get("forks_count").safeInt() ?: 0,
-                openIssuesCount = json.get("open_issues_count").safeInt() ?: 0,
-                isFork = json.get("fork").safeBoolean() ?: false,
-                isArchived = json.get("archived").safeBoolean() ?: false,
-                createdAt = json.get("created_at").safeString(),
-                updatedAt = json.get("updated_at").safeString(),
-                pushedAt = json.get("pushed_at").safeString(),
-                license = json.get("license")?.let { if (it.isJsonObject) it.asJsonObject else null }?.get("spdx_id").safeString(),
-                topics = json.get("topics")?.asJsonArray?.map { it.safeString() ?: "" } ?: emptyList(),
-                parentRepo = parentName,
-                aheadBy = ahead,
-                behindBy = behind
-            )
+        val issues = GitHubIssuesStats(
+            totalIssues = totalIssues,
+            openIssues = openIssues,
+            closedIssues = closedIssues,
+            healthRatio = if (totalIssues > 0) closedIssues.toDouble() / totalIssues else 1.0
+        )
 
-            val issues = GitHubIssuesStats(
-                totalIssues = totalIssues,
-                openIssues = repo.openIssuesCount,
-                closedIssues = totalIssues - repo.openIssuesCount,
-                healthRatio = if (totalIssues > 0) (totalIssues - repo.openIssuesCount).toDouble() / totalIssues else 1.0
-            )
-
-            return GitHubData(repo, issues, null)
-        } catch (e: Exception) { return null }
+        return GitHubData(repo, issues, null)
     }
 
     fun fetchRawAsync(scmUrl: String?): CompletableFuture<GitHubRaw?> {
@@ -98,7 +92,8 @@ class GitHubService(private val ctx: ServiceContext) {
                 CompletableFuture.completedFuture<GitHubRaw?>(null)
             } else {
                 val repoJson = JsonParser.parseString(repoJsonStr).asJsonObject
-                val issuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue")
+                val openIssuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue+state:open")
+                val closedIssuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue+state:closed")
                 
                 var compareFuture: CompletableFuture<String?>? = null
                 if (repoJson.get("fork").safeBoolean() == true) {
@@ -113,8 +108,8 @@ class GitHubService(private val ctx: ServiceContext) {
                     }
                 }
                 
-                CompletableFuture.allOf(issuesFuture, compareFuture ?: CompletableFuture.completedFuture(null)).thenApply {
-                    GitHubRaw(repoJsonStr, issuesFuture.get(), compareFuture?.get())
+                CompletableFuture.allOf(openIssuesFuture, closedIssuesFuture, compareFuture ?: CompletableFuture.completedFuture(null)).thenApply {
+                    GitHubRaw(repoJsonStr, openIssuesFuture.get(), closedIssuesFuture.get(), compareFuture?.get())
                 }
             }
         }
@@ -146,6 +141,17 @@ class GitHubService(private val ctx: ServiceContext) {
         }
         return null
     }
+
+    private fun issueCountFromSearch(jsonStr: String): Int {
+        val element = JsonParser.parseString(jsonStr)
+        if (!element.isJsonObject) return 0
+        return element.asJsonObject.get("total_count").safeInt() ?: 0
+    }
 }
 
-data class GitHubRaw(val repoJson: String, val issuesJson: String?, val compareJson: String?)
+data class GitHubRaw(
+    val repoJson: String,
+    val openIssuesJson: String?,
+    val closedIssuesJson: String?,
+    val compareJson: String?
+)

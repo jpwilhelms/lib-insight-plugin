@@ -8,8 +8,6 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.*
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 
 abstract class LibInsightReportTask : DefaultTask() {
 
@@ -24,38 +22,22 @@ abstract class LibInsightReportTask : DefaultTask() {
 
     @get:Input
     @get:Optional
+    abstract val htmlReport: Property<Boolean>
+
+    @get:Input
+    @get:Optional
+    abstract val jsonReport: Property<Boolean>
+
+    @get:Input
+    @get:Optional
     abstract val auditFingerprint: Property<String>
 
     @TaskAction
     fun generate() {
         val gson = Gson()
         val metrics: List<LibMetric> = gson.fromJson(dataFile.get().asFile.readText(), object : TypeToken<List<LibMetric>>() {}.type)
-        
-        val reportItems = metrics.mapNotNull { metric ->
-            val findings = mutableListOf<Finding>()
-            
-            // Evaluate all configured custom audits
-            customAudits.getOrElse(emptyList()).forEach { audit ->
-                if (audit.filter.check(metric)) {
-                    findings.add(Finding(audit.name, audit.level, audit.formatter.apply(metric).toString(), audit.console))
-                }
-            }
-            
-            // Apply suppressions to findings
-            val activeFindings = findings.filter { finding ->
-                metric.suppressions.none { s ->
-                    val idMatches = s.id == metric.id || s.id == "${metric.id}:${metric.version}"
-                    if (idMatches) {
-                        val sTasks = s.tasks ?: listOf("*")
-                        sTasks.contains("*") || sTasks.contains(finding.type)
-                    } else false
-                }
-            }
 
-            if (activeFindings.isNotEmpty()) {
-                ReportItem(metric, activeFindings)
-            } else null
-        }.sortedBy { it.metric.id }
+        val reportItems = LibInsightReportEngine.evaluate(metrics, customAudits.getOrElse(emptyList()))
 
         // Console Output (Granular by level and 'console' flag)
         printConsoleSection("CRITICAL FINDINGS (ERROR)", "ERROR", reportItems)
@@ -63,13 +45,17 @@ abstract class LibInsightReportTask : DefaultTask() {
         printConsoleSection("INFORMATION", "INFO", reportItems)
 
         // Generate JSON Findings Report
-        val reportFile = reportDir.file("report.json").get().asFile
-        reportFile.parentFile.mkdirs()
-        reportFile.writeText(gson.toJson(reportItems))
+        if (jsonReport.getOrElse(true)) {
+            val reportFile = reportDir.file("report.json").get().asFile
+            reportFile.parentFile.mkdirs()
+            reportFile.writeText(gson.toJson(reportItems))
+        }
 
         // Generate HTML Report
-        val htmlFile = reportDir.file("index.html").get().asFile
-        HtmlReportGenerator().generate(reportItems, htmlFile)
+        if (htmlReport.getOrElse(true)) {
+            val htmlFile = reportDir.file("index.html").get().asFile
+            HtmlReportGenerator(project.version.toString()).generate(reportItems, htmlFile)
+        }
 
         println("\nReports generated in: ${reportDir.get().asFile.absolutePath}")
         if (reportItems.isNotEmpty()) {

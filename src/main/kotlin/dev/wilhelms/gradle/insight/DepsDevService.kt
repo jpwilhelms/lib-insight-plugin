@@ -54,46 +54,44 @@ class DepsDevService(private val ctx: ServiceContext) {
     }
 
     fun parse(raw: DepsDevRaw): DepsDevData? {
-        try {
-            val pkgElement = JsonParser.parseString(raw.packageJson)
-            if (!pkgElement.isJsonObject) return null
-            val pkgJson = pkgElement.asJsonObject
-            val dependentCount = pkgJson.get("dependentCount").safeInt() ?: 0
-            
-            val verElement = JsonParser.parseString(raw.versionJson)
-            if (!verElement.isJsonObject) return null
-            val verJson = verElement.asJsonObject
-            val advisories = verJson.getAsJsonArray("advisoryKeys")?.size() ?: 0
-            
-            var scorecard: OpenSsfScorecard? = null
-            raw.projectJson?.let {
-                val pElement = JsonParser.parseString(it)
-                if (pElement.isJsonObject) {
-                    val pJson = pElement.asJsonObject
-                    val sc = pJson.getAsJsonObject("scorecard")
-                    if (sc != null) {
-                        val checks = mutableMapOf<String, Int>()
-                        sc.getAsJsonArray("checks")?.forEach { checkElem ->
-                            if (checkElem.isJsonObject) {
-                                val check = checkElem.asJsonObject
-                                val name = check.get("name").safeString()
-                                val score = check.get("score").safeInt()
-                                if (name != null && score != null && score >= 0) {
-                                    checks[name] = score
-                                }
+        val pkgElement = JsonParser.parseString(raw.packageJson)
+        if (!pkgElement.isJsonObject) return null
+        val pkgJson = pkgElement.asJsonObject
+        val dependentCount = pkgJson.get("dependentCount").safeInt() ?: 0
+
+        val verElement = JsonParser.parseString(raw.versionJson)
+        if (!verElement.isJsonObject) return null
+        val verJson = verElement.asJsonObject
+        val advisories = verJson.getAsJsonArray("advisoryKeys")?.size() ?: 0
+
+        var scorecard: OpenSsfScorecard? = null
+        raw.projectJson?.let {
+            val pElement = JsonParser.parseString(it)
+            if (pElement.isJsonObject) {
+                val pJson = pElement.asJsonObject
+                val sc = pJson.getAsJsonObject("scorecard")
+                if (sc != null) {
+                    val checks = mutableMapOf<String, Int>()
+                    sc.getAsJsonArray("checks")?.forEach { checkElem ->
+                        if (checkElem.isJsonObject) {
+                            val check = checkElem.asJsonObject
+                            val name = check.get("name").safeString()
+                            val score = check.get("score").safeInt()
+                            if (name != null && score != null && score >= 0) {
+                                checks[name] = score
                             }
                         }
-                        scorecard = OpenSsfScorecard(sc.get("overallScore").safeDouble() ?: 0.0, checks)
                     }
+                    scorecard = OpenSsfScorecard(sc.get("overallScore").safeDouble() ?: 0.0, checks)
                 }
             }
+        }
 
-            return DepsDevData(
-                dependentsCount = if (dependentCount > 0) dependentCount else null,
-                advisoriesCount = advisories,
-                scorecard = scorecard
-            )
-        } catch (e: Exception) { return null }
+        return DepsDevData(
+            dependentsCount = if (dependentCount > 0) dependentCount else null,
+            advisoriesCount = advisories,
+            scorecard = scorecard
+        )
     }
 }
 

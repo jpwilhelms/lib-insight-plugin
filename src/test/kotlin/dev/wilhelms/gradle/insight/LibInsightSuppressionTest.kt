@@ -67,6 +67,8 @@ class LibInsightSuppressionTest {
         cacheDir.resolve("maven.json").writeText("""{"response":{"docs":[{"v":"1.0.0","timestamp":123}]}}""")
         cacheDir.resolve("libsio_api.json").writeText("""{"rank": 10}""")
         cacheDir.resolve("github_repo.json").writeText("""{"full_name": "tester/dummy-lib", "stargazers_count": 10, "fork": false}""")
+        cacheDir.resolve("github_issues_open.json").writeText("""{"total_count": 1}""")
+        cacheDir.resolve("github_issues_closed.json").writeText("""{"total_count": 9}""")
 
         // Scenario 1: No active suppression -> Should FAIL
         val resultFail = GradleRunner.create()

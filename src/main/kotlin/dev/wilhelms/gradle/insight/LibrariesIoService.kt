@@ -48,28 +48,26 @@ class LibrariesIoService(private val ctx: ServiceContext) {
     }
 
     fun parse(raw: LibrariesIoRaw): LibrariesIoData? {
-        try {
-            val element = JsonParser.parseString(raw.apiJson)
-            if (!element.isJsonObject) return null
-            val json = element.asJsonObject
-            val breakdown = mutableMapOf<String, Int>()
-            raw.webHtml?.let { html ->
-                val items = Regex("<span class=\"badge[^\"]*\">\\s*(\\d+)\\s*</span>\\s*([^<\\n]+)", RegexOption.MULTILINE)
-                items.findAll(html).forEach { match ->
-                    val value = match.groupValues[1].trim().toInt()
-                    val name = match.groupValues[2].trim()
-                    if (name.isNotBlank() && !name.startsWith("Explore")) {
-                        breakdown[name] = value
-                    }
+        val element = JsonParser.parseString(raw.apiJson)
+        if (!element.isJsonObject) return null
+        val json = element.asJsonObject
+        val breakdown = mutableMapOf<String, Int>()
+        raw.webHtml?.let { html ->
+            val items = Regex("<span class=\"badge[^\"]*\">\\s*(\\d+)\\s*</span>\\s*([^<\\n]+)", RegexOption.MULTILINE)
+            items.findAll(html).forEach { match ->
+                val value = match.groupValues[1].trim().toInt()
+                val name = match.groupValues[2].trim()
+                if (name.isNotBlank() && !name.startsWith("Explore")) {
+                    breakdown[name] = value
                 }
             }
-            return LibrariesIoData(
-                dependentsCount = json.get("dependents_count").safeInt() ?: 0,
-                dependentReposCount = json.get("dependent_repos_count").safeInt() ?: 0,
-                sourcerank = json.get("rank").safeInt() ?: 0,
-                sourcerankBreakdown = breakdown
-            )
-        } catch (e: Exception) { return null }
+        }
+        return LibrariesIoData(
+            dependentsCount = json.get("dependents_count").safeInt() ?: 0,
+            dependentReposCount = json.get("dependent_repos_count").safeInt() ?: 0,
+            sourcerank = json.get("rank").safeInt() ?: 0,
+            sourcerankBreakdown = breakdown
+        )
     }
 }
 

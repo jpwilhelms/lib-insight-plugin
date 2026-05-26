@@ -13,6 +13,7 @@ import org.gradle.api.tasks.*
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -55,11 +56,8 @@ abstract class LibInsightTask : DefaultTask() {
         val dependencies = dependencyData.get()
         val envCacheDir = cacheDir.get().asFile
         
-        // 1. Comprehensive Dirty Check: A lib is only fresh if ALL required files are fresh
-        val status = dependencies.keys.associateWith { gav ->
-            isLibraryFresh(envCacheDir, gav)
-        }
-        
+        // 1. Comprehensive Dirty Check
+        val status = dependencies.keys.associateWith { gav -> isLibraryFresh(envCacheDir, gav) }
         val dirtyGavs = status.filter { !it.value }.keys
         val cachedCount = dependencies.size - dirtyGavs.size
 
@@ -67,15 +65,10 @@ abstract class LibInsightTask : DefaultTask() {
             println("All ${dependencies.size} dependencies are up-to-date in cache.")
         } else {
             println("Analysis Status: $cachedCount cached, ${dirtyGavs.size} to update (Parallelism: ${maxParallel.get()}, Timeout: ${timeoutMinutes.get()}m)")
-            if (gitHubToken.getOrNull().isNullOrBlank()) {
-                println("NOTE: No GH_TOKEN provided. GitHub API rate limits will be low.")
-            }
-            if (librariesIoToken.getOrNull().isNullOrBlank()) {
-                println("NOTE: No LIBRARIES_IO_TOKEN provided. Libraries.io data will be unavailable.")
-            }
+            if (gitHubToken.getOrNull().isNullOrBlank()) println("NOTE: No GH_TOKEN provided. GitHub API rate limits will be low.")
+            if (librariesIoToken.getOrNull().isNullOrBlank()) println("NOTE: No LIBRARIES_IO_TOKEN provided. Libraries.io data will be unavailable.")
         }
 
-        // 2. Setup Progress and Services
         val progress = ProgressLogger(project, javaClass)
         progress.start("Analyzing dependencies", "lib-insight")
 
@@ -88,57 +81,83 @@ abstract class LibInsightTask : DefaultTask() {
         val pomCache = java.util.concurrent.ConcurrentHashMap<String, File>()
         val activeSuppressions = loadSuppressions()
         val completedCount = AtomicInteger(0)
+        val analysisErrors = mutableListOf<String>()
 
-        // 3. Broad Async Execution
-        val allMetricsFutures = dependencies.entries.map { (gav, isDirectDep) ->
-            val parts = gav.split(":")
-            val id = object : ModuleComponentIdentifier {
-                override fun getGroup() = parts[0]
-                override fun getModule() = parts[1]
-                override fun getVersion() = parts[2]
-                override fun getDisplayName() = gav
-                override fun getModuleIdentifier() = object : ModuleIdentifier {
-                    override fun getGroup() = parts[0]
-                    override fun getName() = parts[1]
-                }
-            }
+        // 2. Strict Parallelism Control via Executor
+        // We use a fixed thread pool to limit the number of SIMULTANEOUSLY started library analyses.
+        val executor = Executors.newFixedThreadPool(maxParallel.get())
+        
+        try {
+            val allMetricsFutures = dependencies.entries.map { (gav, isDirectDep) ->
+                // Create a materialized ID to avoid async access to Gradle internal proxies
+                val parts = gav.split(":")
+                val id = GAV(parts[0], parts[1], parts[2], gav)
 
-            analyzeWithCacheAsync(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions)
-                .thenApply { metric ->
+                CompletableFuture.supplyAsync({
+                    analyzeWithCacheAsync(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions).get()
+                }, executor).thenApply { metric ->
                     val current = completedCount.incrementAndGet()
                     progress.progress("[$current/${dependencies.size}] $gav")
                     metric
                 }
-        }
-
-        // Wait with configurable timeout
-        val metrics = mutableListOf<LibMetric>()
-        allMetricsFutures.forEach { future ->
-            try {
-                future.get(timeoutMinutes.get().toLong(), TimeUnit.MINUTES)?.let { metrics.add(it) }
-            } catch (e: Exception) {
-                // Individual failures are handled/logged in analyzeWithCacheAsync
             }
-        }
-        
-        progress.completed()
 
-        val sortedMetrics = metrics.sortedBy { it.id }
-        generateDataFile(sortedMetrics)
-        
-        if (dirtyGavs.isNotEmpty()) {
-            println("Analysis complete. Total metadata records: ${sortedMetrics.size}")
+            // 3. Wait for results safely
+            val metrics = mutableListOf<LibMetric>()
+            allMetricsFutures.forEach { future ->
+                try {
+                    future.get(timeoutMinutes.get().toLong(), TimeUnit.MINUTES)?.let { metrics.add(it) }
+                } catch (e: Exception) {
+                    analysisErrors.add(e.rootMessage())
+                }
+            }
+            
+            progress.completed()
+            if (analysisErrors.isNotEmpty()) {
+                throw org.gradle.api.GradleException(
+                    "Library Insight analysis failed:\n" + analysisErrors.joinToString("\n")
+                )
+            }
+            val sortedMetrics = metrics.sortedBy { it.id }
+            generateDataFile(sortedMetrics)
+            
+            if (dirtyGavs.isNotEmpty()) {
+                println("Analysis complete. Total metadata records: ${sortedMetrics.size}")
+            }
+        } finally {
+            executor.shutdown()
+            executor.awaitTermination(1, TimeUnit.MINUTES)
         }
     }
 
     private fun isLibraryFresh(baseDir: File, gav: String): Boolean {
         val parts = gav.split(":")
         val dir = File(baseDir, "v$CACHE_VERSION/${parts[0]}/${parts[1]}/${parts[2]}")
-        
-        // We consider a library fresh only if at least the core metadata is there and fresh.
-        // GitHub/LibrariesIO might be missing if no SCM was found, so we check the 'main' indicators.
-        val coreFiles = listOf(File(dir, "maven.json"), File(dir, "depsdev_pkg.json"))
-        return coreFiles.all { isFresh(it) }
+        val required = listOf(
+            File(dir, "maven.json"),
+            File(dir, "depsdev_pkg.json"),
+            File(dir, "depsdev_ver.json")
+        )
+        val optional = listOf(
+            File(dir, "depsdev_proj.json"),
+            File(dir, "libsio_api.json"),
+            File(dir, "libsio_web.html")
+        )
+        val githubRepo = File(dir, "github_repo.json")
+        val githubOpen = File(dir, "github_issues_open.json")
+        val githubClosed = File(dir, "github_issues_closed.json")
+        val githubCompare = File(dir, "github_compare.json")
+
+        val githubFresh = if (githubRepo.exists()) {
+            isFresh(githubRepo) &&
+                githubOpen.exists() && githubClosed.exists() &&
+                isFresh(githubOpen) && isFresh(githubClosed) &&
+                (!githubCompare.exists() || isFresh(githubCompare))
+        } else {
+            true
+        }
+
+        return required.all { isFresh(it) } && optional.filter { it.exists() }.all { isFresh(it) } && githubFresh
     }
 
     private fun loadSuppressions(): List<Suppression> {
@@ -154,7 +173,7 @@ abstract class LibInsightTask : DefaultTask() {
     }
 
     private fun analyzeWithCacheAsync(
-        baseDir: File, id: ModuleComponentIdentifier, pomCache: MutableMap<String, File>,
+        baseDir: File, id: GAV, pomCache: MutableMap<String, File>,
         ghS: GitHubService, ddS: DepsDevService, mcS: MavenCentralService, liS: LibrariesIoService,
         isDirect: Boolean, activeSuppressions: List<Suppression>
     ): CompletableFuture<LibMetric?> {
@@ -165,23 +184,34 @@ abstract class LibInsightTask : DefaultTask() {
         val scmUrl = extractScmUrl(pomFile, id)
         val license = pomFile?.let { extractLicense(it) }
 
-        // Fetch each provider only if not fresh
+        // Provider Futures
         val mcFile = File(dir, "maven.json")
         val mcFuture = if (isFresh(mcFile)) CompletableFuture.completedFuture(mcFile.readText()) 
                        else mcS.fetchRawAsync(id.group, id.module).thenApply { it?.also { mcFile.writeText(it) } }
 
         val ghRepoFile = File(dir, "github_repo.json")
-        val ghIssuesFile = File(dir, "github_issues.json")
+        val ghOpenIssuesFile = File(dir, "github_issues_open.json")
+        val ghClosedIssuesFile = File(dir, "github_issues_closed.json")
         val ghCompareFile = File(dir, "github_compare.json")
-        val ghFuture = if (isFresh(ghRepoFile)) {
-            CompletableFuture.completedFuture(GitHubRaw(ghRepoFile.readText(), 
-                if (ghIssuesFile.exists()) ghIssuesFile.readText() else null,
-                if (ghCompareFile.exists()) ghCompareFile.readText() else null))
+        val ghFuture = if (isFresh(ghRepoFile) &&
+            ghOpenIssuesFile.exists() &&
+            ghClosedIssuesFile.exists() &&
+            isFresh(ghOpenIssuesFile) &&
+            isFresh(ghClosedIssuesFile) &&
+            (!ghCompareFile.exists() || isFresh(ghCompareFile))
+        ) {
+            CompletableFuture.completedFuture(GitHubRaw(
+                ghRepoFile.readText(),
+                if (ghOpenIssuesFile.exists()) ghOpenIssuesFile.readText() else null,
+                if (ghClosedIssuesFile.exists()) ghClosedIssuesFile.readText() else null,
+                if (ghCompareFile.exists()) ghCompareFile.readText() else null
+            ))
         } else if (scmUrl != null) {
             ghS.fetchRawAsync(scmUrl).thenApply { res ->
                 res?.also {
                     ghRepoFile.writeText(it.repoJson)
-                    it.issuesJson?.let { issues -> ghIssuesFile.writeText(issues) }
+                    it.openIssuesJson?.let { issues -> ghOpenIssuesFile.writeText(issues) }
+                    it.closedIssuesJson?.let { issues -> ghClosedIssuesFile.writeText(issues) }
                     it.compareJson?.let { comp -> ghCompareFile.writeText(comp) }
                 }
             }
@@ -190,7 +220,7 @@ abstract class LibInsightTask : DefaultTask() {
         val ddPkgFile = File(dir, "depsdev_pkg.json")
         val ddVerFile = File(dir, "depsdev_ver.json")
         val ddProjFile = File(dir, "depsdev_proj.json")
-        val ddFuture = if (isFresh(ddPkgFile)) {
+        val ddFuture = if (isFresh(ddPkgFile) && isFresh(ddVerFile) && (!ddProjFile.exists() || isFresh(ddProjFile))) {
             CompletableFuture.completedFuture(DepsDevRaw(ddPkgFile.readText(), ddVerFile.readText(), 
                 if (ddProjFile.exists()) ddProjFile.readText() else null))
         } else {
@@ -205,7 +235,7 @@ abstract class LibInsightTask : DefaultTask() {
 
         val liFile = File(dir, "libsio_api.json")
         val liWebFile = File(dir, "libsio_web.html")
-        val liFuture = if (isFresh(liFile)) {
+        val liFuture = if (isFresh(liFile) && (!liWebFile.exists() || isFresh(liWebFile))) {
             CompletableFuture.completedFuture(LibrariesIoRaw(liFile.readText(), 
                 if (liWebFile.exists()) liWebFile.readText() else null))
         } else {
@@ -239,11 +269,11 @@ abstract class LibInsightTask : DefaultTask() {
                 librariesIo = liData,
                 cachedAt = Instant.now().toString()
             )
-        }.exceptionally { null }
+        }
     }
 
-    private fun findInheritedPom(id: ModuleComponentIdentifier, cache: MutableMap<String, File>): File? {
-        val key = "${id.group}:${id.module}:${id.version}"
+    private fun findInheritedPom(id: GAV, cache: MutableMap<String, File>): File? {
+        val key = id.displayName
         if (cache.containsKey(key)) return cache[key]
         val groupPath = id.group.replace('.', '/')
         val url = "https://repo1.maven.org/maven2/${groupPath}/${id.module}/${id.version}/${id.module}-${id.version}.pom"
@@ -263,7 +293,7 @@ abstract class LibInsightTask : DefaultTask() {
         return file
     }
 
-    private fun extractScmUrl(pomFile: File?, id: ModuleComponentIdentifier): String? {
+    private fun extractScmUrl(pomFile: File?, id: GAV): String? {
         if (pomFile != null) {
             try {
                 val content = pomFile.readText()
@@ -304,4 +334,19 @@ abstract class LibInsightTask : DefaultTask() {
     companion object {
         const val CACHE_VERSION = 1
     }
+}
+
+/** Stable materialized GAV to avoid async proxy issues */
+data class GAV(val group: String, val module: String, val version: String, val displayName: String)
+
+private fun Throwable.rootMessage(): String {
+    var current: Throwable? = this
+    var lastMessage: String? = null
+    while (current != null) {
+        if (!current.message.isNullOrBlank()) {
+            lastMessage = current.message
+        }
+        current = current.cause
+    }
+    return lastMessage ?: this::class.java.name
 }

@@ -19,7 +19,7 @@ The Library Insight plugin analyzes project dependencies and provides quality as
 
 ```groovy
 plugins {
-    id "dev.wilhelms.gradle.lib-insight" version "1.0.0"
+    id "dev.wilhelms.gradle.lib-insight" version "<latest-published-version>"
 }
 ```
 
@@ -37,10 +37,10 @@ libInsight {
     customAudits {
         // 1. Stale Fork Detection
         create("forks") {
-            description = "Identifies forks that are significantly behind upstream"
-            level = "ERROR"
-            filter { it.github?.repo?.isFork && (it.github?.repo?.behindBy ?: 0) > 10 }
-            format { "Fork is stale: ${it.github.repo.behindBy} commits behind upstream" }
+            description = "Flags forks that lag behind their upstream"
+            level = "WARN"
+            filter { it.github?.repo?.isFork && (it.github?.repo?.behindBy ?: 0) > 0 }
+            format { "Fork is behind upstream by ${it.github.repo.behindBy} commits${it.github.repo.parentRepo != null ? \" (${it.github.repo.parentRepo})\" : \"\"}" }
         }
         
         // 2. Outdated Version Check
@@ -58,7 +58,68 @@ libInsight {
             format { "CRITICAL: ${it.depsDev.advisoriesCount} known security advisories!" }
         }
 
-        // 4. Maintenance Check (Silent in console)
+        // 4. License Review
+        create("licenseUnknown") {
+            description = "Flags direct, low-adoption dependencies whose license could not be asserted"
+            level = "WARN"
+            filter {
+                def license = it.github?.repo?.license
+                it.isDirect &&
+                (license == null || license == "NOASSERTION") &&
+                it.librariesIo != null &&
+                it.librariesIo.dependentReposCount < 5 &&
+                it.librariesIo.dependentsCount < 25
+            }
+            format {
+                def license = it.github?.repo?.license
+                def repos = it.librariesIo?.dependentReposCount ?: 0
+                def dependents = it.librariesIo?.dependentsCount ?: 0
+                "License review needed: ${license ?: 'unknown'}; adoption ${repos} repos / ${dependents} dependents"
+            }
+        }
+
+        // 5. Scorecard Maintenance Check
+        create("maintainedLow") {
+            description = "Highlights dependencies with poor OpenSSF Maintained scores"
+            level = "WARN"
+            filter { (it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2 }
+            format {
+                def maintained = it.depsDev?.scorecard?.checks?.get("Maintained") ?: 0
+                "Maintained score is ${maintained}"
+            }
+        }
+
+        // 6. Inactive Repository Warning
+        create("staleRepo") {
+            description = "Flags repositories without a push for more than three years"
+            level = "WARN"
+            filter {
+                it.github?.repo?.isInactiveFor(1095) ?: false
+            }
+            format {
+                def repo = it.github?.repo
+                "Repository inactive since ${repo.pushedAt}" + (repo.stargazersCount != null ? " (${repo.stargazersCount} stars)" : "")
+            }
+        }
+
+        // 7. Stale Unlicensed Repository
+        create("staleUnlicensed") {
+            description = "Flags stale repositories whose license cannot be asserted"
+            level = "WARN"
+            filter {
+                def repo = it.github?.repo
+                def license = repo?.license
+                (repo?.isInactiveFor(1095) ?: false) &&
+                (license == null || license == "NOASSERTION")
+            }
+            format {
+                def repo = it.github?.repo
+                def license = repo?.license
+                "Stale repo with unknown license: ${license ?: 'unknown'}; last push ${repo.pushedAt}"
+            }
+        }
+
+        // 8. Maintenance Check (Silent in console)
         create("maintenanceCheck") {
             level = "INFO"
             console = false // Only visible in HTML report
@@ -69,12 +130,93 @@ libInsight {
             format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
         }
 
-        // 5. Niche Library Warning (using Libraries.io)
+        // 9. Niche Library Warning (using Libraries.io)
         create("nicheLibrary") {
-            description = "Flags libraries with very low adoption"
+            description = "Flags libraries with very low adoption across repositories and packages"
             level = "WARN"
-            filter { it.librariesIo != null && it.librariesIo.dependentReposCount < 5 }
-            format { "Niche Library: Only ${it.librariesIo.dependentReposCount} other repositories depend on this." }
+            filter {
+                it.librariesIo != null &&
+                it.librariesIo.dependentReposCount < 5 &&
+                it.librariesIo.dependentsCount < 25
+            }
+            format { "Niche Library: ${it.librariesIo.dependentReposCount} repos / ${it.librariesIo.dependentsCount} total dependents" }
+        }
+    }
+}
+```
+
+In multi-project aggregate builds, `it.isDirect` is true for any dependency resolved from any project classpath in the build, not only for root-project declarations.
+
+For convenience, date-heavy fields already expose parsed helpers, for example `it.github?.repo?.isInactiveFor(365)` and `it.mavenCentral?.isOlderThanLatest(730)`, so custom audits can stay readable without manual date parsing.
+
+If you want a copy-paste starting point for direct governance plus transitive hygiene checks, this pattern works well:
+
+### Direct Governance
+Use these when you want to surface direct dependencies that matter for governance decisions in aggregate builds.
+
+### Transitive Hygiene
+Use these when you want visibility into older or weakly maintained transitive libraries without turning them into gates.
+
+```groovy
+libInsight {
+    customAudits {
+        create("staleRepo") {
+            description = "Flags repositories that have not been updated for a long time"
+            level = "WARN"
+            filter { it.github?.repo?.isInactiveFor(365) ?: false }
+            format {
+                def repo = it.github?.repo
+                "No push for more than a year: ${repo?.pushed}${repo?.stargazersCount != null ? \" (${repo.stargazersCount} stars)\" : \"\"}"
+            }
+        }
+
+        create("outdated") {
+            description = "Highlights releases that lag behind the latest version"
+            level = "WARN"
+            filter { it.mavenCentral?.isOlderThanLatest(730) ?: false }
+            format { "Update recommended: latest is ${it.mavenCentral.latestVersion}" }
+        }
+
+        create("staleUnlicensed") {
+            description = "Flags stale repositories whose license is unclear"
+            level = "WARN"
+            filter {
+                def repo = it.github?.repo
+                (repo?.isInactiveFor(365) ?: false) && (repo?.license == null || repo.license == "NOASSERTION")
+            }
+            format {
+                def repo = it.github?.repo
+                "Stale repo with unknown license: ${repo?.license ?: 'unknown'}; last push ${repo?.pushed}"
+            }
+        }
+
+        create("licenseUnknownDirect") {
+            description = "Direct, low-adoption dependencies whose license could not be asserted"
+            level = "WARN"
+            filter {
+                def license = it.github?.repo?.license
+                it.isDirect &&
+                (license == null || license == "NOASSERTION") &&
+                it.librariesIo != null &&
+                it.librariesIo.dependentReposCount < 5 &&
+                it.librariesIo.dependentsCount < 25
+            }
+            format {
+                def license = it.github?.repo?.license
+                def repos = it.librariesIo?.dependentReposCount ?: 0
+                def dependents = it.librariesIo?.dependentsCount ?: 0
+                "License review needed: ${license ?: 'unknown'}; adoption ${repos} repos / ${dependents} dependents"
+            }
+        }
+
+        create("maintainedLowDirect") {
+            description = "Direct dependencies with poor OpenSSF Maintained scores"
+            level = "WARN"
+            filter { it.isDirect && ((it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2) }
+            format {
+                def maintained = it.depsDev?.scorecard?.checks?.get("Maintained") ?: 0
+                "Maintained score is ${maintained}"
+            }
         }
     }
 }
@@ -87,9 +229,11 @@ libInsight {
 | :--- | :--- | :--- | :--- |
 | `gitHubToken` | `GH_TOKEN` | - | GitHub Personal Access Token for higher rate limits. |
 | `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
-| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Shared metadata cache directory. |
+| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Shared metadata cache directory. Accepts an absolute path. |
 | `cacheTtlDays` | - | `1` | Cache validity in days. |
 | `asyncTimeoutMinutes` | - | `30` | Maximum time to wait for all asynchronous API requests. |
+| `htmlReport` | - | `true` | Writes `build/reports/lib-insight/index.html`. |
+| `jsonReport` | - | `true` | Writes `build/reports/lib-insight/report.json`. |
 | `suppressionFile` | - | - | JSON file containing findings to ignore. |
 
 ---
@@ -132,6 +276,18 @@ You can suppress specific findings by providing a JSON file (`suppressionFile` p
     "id": "org.apache.logging.log4j:log4j-core:2.17.1",
     "reason": "Verified safe in our context",
     "tasks": ["securityGate"]
+  }
+]
+```
+
+**Example: Time-bounded suppression**
+```json
+[
+  {
+    "id": "com.example:legacy-lib",
+    "reason": "Temporary exception",
+    "until": "2026-12-31",
+    "tasks": ["*"]
   }
 ]
 ```

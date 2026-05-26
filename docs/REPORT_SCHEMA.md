@@ -13,12 +13,39 @@ This file contains the complete set of metadata collected for every dependency.
 | :--- | :--- | :--- |
 | `id` | `String` | GAV coordinates without version (`group:artifact`) |
 | `version` | `String` | The used version string |
-| `isDirect` | `Boolean` | True if explicitly declared in the project |
-| `cacheTime` | `Instant` | When this data was last collected/cached |
+| `gradleInsight` | `String` | Internal marker used by the plugin (`findings`) |
+| `isDirect` | `Boolean` | True if resolved from any project classpath in the build (aggregate multi-project semantics) |
+| `suppressions` | `List<Suppression>` | Suppression rules attached to this dependency |
+| `pom` | `Object` | Maven POM metadata used for source and license discovery |
 | `mavenCentral`| `Object?` | Data from Maven Central (see below) |
 | `github` | `Object?` | Data from GitHub (see below) |
 | `depsDev` | `Object?` | Data from Google deps.dev (see below) |
 | `librariesIo` | `Object?` | Data from Libraries.io (see below) |
+| `cachedAt` | `String` | ISO-8601 timestamp of when the entry was collected |
+
+**Helper Methods:**
+*   `cacheTime`: Parsed `Instant?` derived from `cachedAt`.
+
+---
+
+### Suppressions (`suppressions[]`)
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `id` | `String` | Dependency identifier (`group:artifact` or `group:artifact:version`) |
+| `reason` | `String` | Human-readable justification |
+| `until` | `String?` | Optional expiry date/time in ISO-8601 date or instant format |
+| `tasks` | `List<String>?` | Audit names to suppress, or `["*"]` for all audits |
+
+---
+
+### POM Metadata (`pom`)
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `url` | `String` | POM URL used by the analyzer |
+| `license` | `String?` | License name extracted from the POM |
+| `scmUrl` | `String?` | SCM URL extracted from the POM |
 
 ---
 
@@ -26,9 +53,9 @@ This file contains the complete set of metadata collected for every dependency.
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `released` | `Instant?` | Release date of the currently used version |
-| `latestRelease` | `Instant?` | Release date of the newest available version |
-| `latestVersion` | `String?` | The version string of the newest release |
+| `currentVersionReleaseDate` | `String?` | Release date of the currently used version |
+| `latestVersionReleaseDate` | `String?` | Release date of the newest available version by version ordering |
+| `latestVersion` | `String?` | The highest version string found in Maven Central |
 | `releaseCount` | `Int` | Total number of versions released |
 
 **Helper Methods:**
@@ -53,15 +80,22 @@ This file contains the complete set of metadata collected for every dependency.
 **Helper Methods:**
 *   `isInactiveFor(days: Int)`: Returns true if the last commit was more than X days ago.
 
+The parsed properties `created`, `updated`, and `pushed` are available as `Instant?`, so custom audits can compare against them directly without manual parsing.
+
 ---
 
 ### GitHub Issues (`github.issues`)
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `totalIssues` | `Int` | Total number of issues (ever) |
+| `totalIssues` | `Int` | Total number of issues (open + closed) |
 | `openIssues` | `Int` | Currently open issues |
+| `closedIssues` | `Int` | Currently closed issues |
 | `healthRatio` | `Double` | Ratio of closed issues to total issues (0.0 to 1.0) |
+
+### GitHub Activity (`github.activity`)
+
+Currently present in the schema as `null`.
 
 ---
 
@@ -73,6 +107,7 @@ This file contains the complete set of metadata collected for every dependency.
 | `scorecard.checks` | `Map<String, Int>`| Individual check scores (e.g., "Maintained": 10) |
 | `dependentsCount` | `Int?` | Number of other projects depending on this one |
 | `advisoriesCount` | `Int` | Number of security advisories associated with this version |
+| `systems` | `List<String>` | Known dependency systems (currently usually empty) |
 
 ---
 
@@ -101,7 +136,8 @@ This file is a filtered view of the metadata, containing only items with identif
       {
         "type": "AUDIT:customName",
         "level": "ERROR", 
-        "message": "Custom formatted message"
+        "message": "Custom formatted message",
+        "console": true
       }
     ]
   }
