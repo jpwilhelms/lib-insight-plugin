@@ -51,7 +51,7 @@ afterEvaluate {
     publishing {
         publications.withType<MavenPublication>().configureEach {
             if (name == "pluginMaven") {
-                artifactId = "gradle-lib-insight"
+                artifactId = "lib-insight-plugin"
             }
             
             pom {
