@@ -1,0 +1,109 @@
+plugins {
+    `kotlin-dsl`
+    `java-gradle-plugin`
+    `maven-publish`
+    `signing`
+    id("org.jetbrains.dokka") version "1.9.10"
+    id("com.gradleup.nmcp") version "0.0.9"
+}
+
+group = "dev.wilhelms.gradle"
+version = project.findProperty("version")?.toString() ?: "0.1.0-SNAPSHOT"
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation("dev.wilhelms.gradle:gradle-progress-logger:1.0.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+    testImplementation(kotlin("test"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+    withJavadocJar()
+}
+
+gradlePlugin {
+    website.set("https://github.com/jpwilhelms/lib-insight-plugin")
+    vcsUrl.set("https://github.com/jpwilhelms/lib-insight-plugin.git")
+    isAutomatedPublishing = false // We use NMCP for publishing
+    plugins {
+        create("libInsightPlugin") {
+            id = "dev.wilhelms.gradle.lib-insight"
+            implementationClass = "dev.wilhelms.gradle.insight.LibInsightPlugin"
+            displayName = "Library Insight Plugin"
+            description = "Fact-based supply chain audit tool for Gradle dependencies."
+            tags.set(listOf("audit", "metrics", "dependencies", "security", "supply-chain"))
+        }
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+            artifactId = "gradle-lib-insight"
+            
+            pom {
+                name.set("Library Insight Plugin")
+                description.set("Fact-based supply chain audit tool for Gradle dependencies.")
+                url.set("https://github.com/jpwilhelms/lib-insight-plugin")
+                
+                licenses {
+                    license {
+                        name.set("The Apache License, Version 2.0")
+                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+                
+                developers {
+                    developer {
+                        id.set("jpwilhelms")
+                        name.set("Jan-Peter Wilhelms")
+                        email.set("lib-insight@wilhelms.dev")
+                    }
+                }
+                
+                scm {
+                    connection.set("scm:git:git://github.com/jpwilhelms/lib-insight-plugin.git")
+                    developerConnection.set("scm:git:ssh://github.com:jpwilhelms/lib-insight-plugin.git")
+                    url.set("https://github.com/jpwilhelms/lib-insight-plugin")
+                }
+            }
+        }
+    }
+}
+
+// Modern Maven Central Publishing (New Portal)
+nmcp {
+    publish("maven") {
+        username.set(System.getenv("OSSRH_USERNAME"))
+        password.set(System.getenv("OSSRH_PASSWORD"))
+    }
+}
+
+signing {
+    val key = System.getenv("GPG_PRIVATE_KEY")
+    val password = System.getenv("GPG_PASSPHRASE")
+    if (!key.isNullOrBlank()) {
+        useInMemoryPgpKeys(key, password ?: "")
+        sign(publishing.publications["maven"])
+    }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+tasks.test {
+    useJUnitPlatform()
+}

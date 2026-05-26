@@ -1,71 +1,143 @@
 # Library Insight Gradle Plugin
 
-The Library Insight plugin analyzes project dependencies and provides quality assessments by aggregating data from multiple repository and security sources.
+The Library Insight plugin analyzes project dependencies and provides quality assessments by aggregating data from multiple repository and security sources. It focuses on **Exception Reporting**, highlighting only the libraries that require your attention.
 
 ## Features
-*   **Dependency Analysis:** Evaluates runtime dependencies, including transitive relations.
-*   **Data Integration:**
-    *   **Maven Central:** Retrieves release history and POM metadata.
-    *   **GitHub:** Collects repository metrics including stars, issue statistics, and activity status.
-    *   **Libraries.io:** Provides popularity metrics and SourceRank assessments.
-    *   **Deps.dev:** Integrates OpenSSF Scorecard data for security evaluations.
-*   **Operational Capabilities:**
-    *   Persistent disk caching to optimize repeat executions.
-    *   API rate limiting and error handling for reliable data retrieval.
-    *   Configurable cache TTL and storage locations.
-*   **Reporting:** Generates structured JSON output for integration into audit workflows.
+*   **Dependency Analysis:** Scans your dependency graph and identifies potential risks.
+*   **Provider Integration:** Aggregates data from GitHub, Deps.dev (OpenSSF Scorecard), and Maven Central.
+*   **Structured Reporting:** HTML and JSON reports grouped by severity (Critical, Warning, Info).
+*   **Custom Audits:** Flexible DSL to define your own quality gates.
+*   **CI/CD Governance:** Build failure logic based on identified critical findings.
 
 ## Usage
 
-### 1. Apply the Plugin
-Add the following to your `build.gradle.kts`:
+### Applying the Plugin
+
+<details open>
+<summary>Groovy</summary>
+
+```groovy
+plugins {
+    id "dev.wilhelms.gradle.lib-insight" version "1.0.0-SNAPSHOT"
+}
+```
+</details>
+
+<details>
+<summary>Kotlin</summary>
 
 ```kotlin
 plugins {
-    id("info.wilhelms.gradle.lib-insight") version "1.0.0"
+    id("dev.wilhelms.gradle.lib-insight") version "1.0.0-SNAPSHOT"
 }
 ```
+</details>
 
-### 2. Configuration
-The plugin is configured via the `libInsight` extension. API tokens are recommended to ensure higher rate limits and access to detailed metrics.
+### Configuration
+The plugin comes with no hardcoded audits enabled by default. Use the following snippets in your `customAudits` block to get started.
+
+<details open>
+<summary>Groovy (build.gradle)</summary>
+
+```groovy
+libInsight {
+    autoCheck = true
+    
+    customAudits {
+        create("forks") {
+            description = "Identifies forks that are significantly behind upstream"
+            level = "ERROR" // Errors fail the build
+            filter { it.github?.repo?.isFork && (it.github?.repo?.behindBy ?: 0) > 10 }
+            format { "Fork is stale: ${it.github.repo.behindBy} commits behind upstream" }
+        }
+        
+        create("outdated") {
+            description = "Checks if the used version is significantly older than the latest"
+            level = "WARN" // Warnings are visible but do not fail the build
+            filter { it.mavenCentral?.isOlderThanLatest(730) }
+            format { "Update recommended: Latest is ${it.mavenCentral.latestVersion}" }
+        }
+    }
+}
+```
+</details>
+
+<details>
+<summary>Kotlin (build.gradle.kts)</summary>
 
 ```kotlin
 libInsight {
-    // API tokens for repository metadata
-    gitHubToken.set(System.getenv("GITHUB_TOKEN"))
-    librariesIoToken.set(System.getenv("LIBRARIES_IO_TOKEN"))
+    autoCheck.set(true)
     
-    // Optional: Configure cache duration (default: 1 day)
-    cacheTtlDays.set(7)
-    
-    // Optional: Threshold for identifying abandoned projects (in days)
-    abandonedThresholdDays.set(730)
+    customAudits {
+        create("forks") {
+            level.set("ERROR")
+            filter { it.github?.repo?.isFork == true && (it.github?.repo?.behindBy ?: 0) > 10 }
+            format { "Fork is stale: ${it.github?.repo?.behindBy} commits behind upstream" }
+        }
+    }
+}
+```
+</details>
+
+### Global Configuration & Environment Variables
+
+| Property | Env Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `gitHubToken` | `GH_TOKEN` | - | GitHub Personal Access Token for higher rate limits. |
+| `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
+| `maxParallelDownloads` | - | `10` | Number of concurrent API requests for data collection. |
+| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `.gradle/lib-insight-cache` | Directory for raw API response metadata. |
+| `autoCheck` | - | `false` | If `true`, hooks `libInsightCheck` into the standard `check` task. |
+
+---
+
+## Audit Configuration
+
+Each custom audit supports the following properties:
+
+| Property | Default | Description |
+| :--- | :--- | :--- |
+| `level` | `"ERROR"` | Severity of the finding. <br>• **`ERROR`**: Findings appear in "Critical Issues" and **fail the build**. <br>• **`WARN`**: Findings appear in "Warnings", visible but non-blocking. <br>• **`INFO`**: Findings appear in "Information" section. |
+| `console`| `true` | If `true`, findings are printed to the terminal during build. |
+| `description` | - | Optional description of the audit's purpose. |
+| `enabled` | `true` | If `false`, the audit is skipped. |
+
+---
+
+## Advanced Custom Audit Examples (Groovy)
+
+### 1. Security Quality Gate
+Fails the build if there are known vulnerabilities.
+```groovy
+create("securityGate") {
+    level = "ERROR"
+    filter { 
+        def advisories = it.depsDev?.advisoriesCount ?: 0
+        return advisories > 0
+    }
+    format { "CRITICAL: ${it.depsDev.advisoriesCount} known security advisories!" }
 }
 ```
 
-### 3. Generate Reports
-Execute the report generation task:
-```bash
-./gradlew generateLibQualityReport
-```
-The resulting JSON report is stored in `build/reports/lib-insight/report.json`.
-
-### 4. Specialized Audits
-The plugin includes pre-configured audit tasks for quick assessments:
-
-```bash
-# Identify projects with low activity
-./gradlew auditAbandoned
-
-# Identify forked repositories and track upstream status
-./gradlew auditForks
+### 2. Maintenance Information (Silent)
+Gather info about poor maintenance without cluttering the console or failing the build.
+```groovy
+create("maintenanceCheck") {
+    level = "INFO"
+    console = false // Only visible in HTML report
+    filter { 
+        def issues = it.github?.issues
+        return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
+    }
+    format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
+}
 ```
 
-## Metrics and Evaluation
-The plugin provides objective data points from independent sources to support supply chain risk management and dependency auditing.
+## Tasks
 
-## Development & Attribution
-This project is developed using a hybrid approach, leveraging AI-assisted software engineering (via Gemini) for implementation, documentation, and maintenance. All AI-generated contributions are subject to manual review and verification to ensure technical integrity and adherence to quality standards.
+*   `libInsightReport`: **Reporting.** Evaluates all audits and generates findings-based reports. (Triggers data collection automatically).
+*   `libInsightCheck`: **Governance.** Runs analysis and fails the build if any `ERROR` level findings exist.
 
 ## License
 Licensed under the [Apache License, Version 2.0](LICENSE).

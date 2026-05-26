@@ -1,6 +1,9 @@
 # Gradle
 .gradle/
 build/
+*.init.gradle
+gradle-8.5/
+gradle.zip
 
 # Kotlin
 .kotlin/
