@@ -58,6 +58,7 @@ class LibInsightPluginTest {
                 api name: 'dummy-lib', group: 'com.github.tester', version: '1.0.0'
             }
             libInsight {
+                cacheDir = file(".gradle/lib-insight-cache")
                 customAudits {
                     create("securityRisk") {
                         level = "ERROR"
@@ -109,6 +110,7 @@ class LibInsightPluginTest {
                 api("com.github.tester:dummy-lib:1.0.0")
             }
             libInsight {
+                cacheDir.set(file(".gradle/lib-insight-cache"))
                 customAudits {
                     create("securityRisk") {
                         level.set("ERROR")
@@ -154,6 +156,7 @@ class LibInsightPluginTest {
                 api name: 'dummy-lib', group: 'com.github.tester', version: '1.0.0'
             }
             libInsight {
+                cacheDir = file(".gradle/lib-insight-cache")
                 customAudits {
                     create("outdated") {
                         level = "ERROR"

@@ -70,6 +70,9 @@ abstract class LibInsightTask : DefaultTask() {
             if (gitHubToken.getOrNull().isNullOrBlank()) {
                 println("NOTE: No GH_TOKEN provided. GitHub API rate limits will be low.")
             }
+            if (librariesIoToken.getOrNull().isNullOrBlank()) {
+                println("NOTE: No LIBRARIES_IO_TOKEN provided. Libraries.io data will be unavailable.")
+            }
             println("Analyzing ${dependencies.size} dependencies (${dirtyGavs.size} need update, Parallelism: ${maxParallel.get()})...")
         }
 
@@ -234,7 +237,6 @@ abstract class LibInsightTask : DefaultTask() {
             version = id.version,
             gradleInsight = "findings",
             isDirect = provenance.isDirect,
-            requestedBy = provenance.requestedBy.toList(),
             suppressions = activeSuppressions,
             pom = PomInfo(pomUrl, license, scmUrl),
             mavenCentral = mcData,

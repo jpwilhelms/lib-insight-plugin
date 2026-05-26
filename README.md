@@ -2,6 +2,9 @@
 
 The Library Insight plugin analyzes project dependencies and provides quality assessments by aggregating data from multiple repository and security sources. It focuses on **Exception Reporting**, highlighting only the libraries that require your attention.
 
+> [!IMPORTANT]
+> This plugin was developed with **AI assistance** to ensure high-fidelity data collection and modern architectural standards.
+
 ## Features
 *   **Dependency Analysis:** Scans your dependency graph and identifies potential risks.
 *   **Provider Integration:** Aggregates data from GitHub, Deps.dev (OpenSSF Scorecard), and Maven Central.
@@ -13,67 +16,58 @@ The Library Insight plugin analyzes project dependencies and provides quality as
 
 ### Applying the Plugin
 
-<details open>
-<summary>Groovy</summary>
-
 ```groovy
 plugins {
-    id "dev.wilhelms.gradle.lib-insight" version "1.0.0-SNAPSHOT"
+    id "dev.wilhelms.gradle.lib-insight" version "1.0.0"
 }
 ```
-</details>
-
-<details>
-<summary>Kotlin</summary>
-
-```kotlin
-plugins {
-    id("dev.wilhelms.gradle.lib-insight") version "1.0.0-SNAPSHOT"
-}
-```
-</details>
 
 ### Configuration
 The plugin comes with no hardcoded audits enabled by default. Use the following snippets in your `customAudits` block to get started.
 
 <details open>
-<summary>Groovy (build.gradle)</summary>
+<summary>Example Configuration (build.gradle)</summary>
 
 ```groovy
 libInsight {
     autoCheck = true
     
+    // Path to optional suppressions file
+    suppressionFile = file("lib-insight-suppressions.json")
+
     customAudits {
+        // 1. Stale Fork Detection
         create("forks") {
             description = "Identifies forks that are significantly behind upstream"
-            level = "ERROR" // Errors fail the build
+            level = "ERROR"
             filter { it.github?.repo?.isFork && (it.github?.repo?.behindBy ?: 0) > 10 }
             format { "Fork is stale: ${it.github.repo.behindBy} commits behind upstream" }
         }
         
+        // 2. Outdated Version Check
         create("outdated") {
             description = "Checks if the used version is significantly older than the latest"
-            level = "WARN" // Warnings are visible but do not fail the build
+            level = "WARN"
             filter { it.mavenCentral?.isOlderThanLatest(730) }
             format { "Update recommended: Latest is ${it.mavenCentral.latestVersion}" }
         }
-    }
-}
-```
-</details>
 
-<details>
-<summary>Kotlin (build.gradle.kts)</summary>
+        // 3. Security Quality Gate
+        create("securityGate") {
+            level = "ERROR"
+            filter { (it.depsDev?.advisoriesCount ?: 0) > 0 }
+            format { "CRITICAL: ${it.depsDev.advisoriesCount} known security advisories!" }
+        }
 
-```kotlin
-libInsight {
-    autoCheck.set(true)
-    
-    customAudits {
-        create("forks") {
-            level.set("ERROR")
-            filter { it.github?.repo?.isFork == true && (it.github?.repo?.behindBy ?: 0) > 10 }
-            format { "Fork is stale: ${it.github?.repo?.behindBy} commits behind upstream" }
+        // 4. Maintenance Check (Silent in console)
+        create("maintenanceCheck") {
+            level = "INFO"
+            console = false // Only visible in HTML report
+            filter { 
+                def issues = it.github?.issues
+                return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
+            }
+            format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
         }
     }
 }
@@ -86,8 +80,8 @@ libInsight {
 | :--- | :--- | :--- | :--- |
 | `gitHubToken` | `GH_TOKEN` | - | GitHub Personal Access Token for higher rate limits. |
 | `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
-| `maxParallelDownloads` | - | `10` | Number of concurrent API requests for data collection. |
-| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `.gradle/lib-insight-cache` | Directory for raw API response metadata. |
+| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Directory for raw API response metadata. |
+| `suppressionFile` | - | - | JSON file containing findings to ignore. |
 | `autoCheck` | - | `false` | If `true`, hooks `libInsightCheck` into the standard `check` task. |
 
 ---
@@ -105,38 +99,25 @@ Each custom audit supports the following properties:
 
 ---
 
-## Advanced Custom Audit Examples (Groovy)
+## Data Schema & Reports
 
-### 1. Security Quality Gate
-Fails the build if there are known vulnerabilities.
-```groovy
-create("securityGate") {
-    level = "ERROR"
-    filter { 
-        def advisories = it.depsDev?.advisoriesCount ?: 0
-        return advisories > 0
-    }
-    format { "CRITICAL: ${it.depsDev.advisoriesCount} known security advisories!" }
-}
-```
+Library Insight produces detailed reports in the build directory. For a full description of the available fields in `LibMetric` (to be used in your `filter` and `format` closures), please refer to the **[JSON Report Schema](docs/REPORT_SCHEMA.md)**.
 
-### 2. Maintenance Information (Silent)
-Gather info about poor maintenance without cluttering the console or failing the build.
-```groovy
-create("maintenanceCheck") {
-    level = "INFO"
-    console = false // Only visible in HTML report
-    filter { 
-        def issues = it.github?.issues
-        return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
-    }
-    format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
-}
+### Suppressions
+You can suppress specific findings by providing a JSON file:
+```json
+[
+  {
+    "id": "com.google.code.gson:gson",
+    "reason": "Temporary exception for specific version",
+    "tasks": ["outdated"]
+  }
+]
 ```
 
 ## Tasks
 
-*   `libInsightReport`: **Reporting.** Evaluates all audits and generates findings-based reports. (Triggers data collection automatically).
+*   `libInsightReport`: **Reporting.** Evaluates all audits and generates findings-based reports.
 *   `libInsightCheck`: **Governance.** Runs analysis and fails the build if any `ERROR` level findings exist.
 
 ## License

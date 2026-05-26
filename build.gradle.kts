@@ -69,7 +69,7 @@ publishing {
                     developer {
                         id.set("jpwilhelms")
                         name.set("Jan-Peter Wilhelms")
-                        email.set("lib-insight@wilhelms.dev")
+                        email.set("lib-insight-plugin@wilhelms.dev")
                     }
                 }
                 

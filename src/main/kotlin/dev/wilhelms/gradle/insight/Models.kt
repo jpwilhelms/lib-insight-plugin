@@ -34,16 +34,6 @@ abstract class LibInsightExtension {
 
     abstract val maxParallelDownloads: Property<Int>
 
-    // Audit configurations (Flat structure for maximum Gradle compatibility)
-    abstract val forksEnabled: Property<Boolean>
-    abstract val forksConsole: Property<Boolean>
-    abstract val forksLevel: Property<String>
-
-    abstract val abandonedEnabled: Property<Boolean>
-    abstract val abandonedConsole: Property<Boolean>
-    abstract val abandonedLevel: Property<String>
-    abstract val abandonedThresholdDays: Property<Int>
-
     abstract val customAudits: NamedDomainObjectContainer<CustomAuditConfiguration>
     
     fun customAudits(action: Action<NamedDomainObjectContainer<CustomAuditConfiguration>>) {
@@ -98,7 +88,6 @@ data class LibMetric(
     val version: String,
     val gradleInsight: String,
     val isDirect: Boolean,
-    val requestedBy: List<String>,
     val suppressions: List<Suppression>,
     val pom: PomInfo,
     val mavenCentral: MavenCentralData?,
@@ -111,8 +100,7 @@ data class LibMetric(
 }
 
 data class DependencyProvenance(
-    val isDirect: Boolean,
-    val requestedBy: Set<String>
+    val isDirect: Boolean
 ) : Serializable
 
 data class Suppression(

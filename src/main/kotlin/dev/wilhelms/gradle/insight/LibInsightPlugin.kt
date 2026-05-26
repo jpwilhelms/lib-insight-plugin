@@ -5,6 +5,7 @@ import org.gradle.api.Project
 import org.gradle.api.Action
 import org.gradle.api.Task
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import java.io.File
 
 class LibInsightPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -18,19 +19,13 @@ class LibInsightPlugin : Plugin<Project> {
         extension.autoCheck.convention(false)
         extension.maxParallelDownloads.convention(10)
 
-        extension.forksEnabled.convention(true)
-        extension.forksConsole.convention(true)
-        extension.forksLevel.convention("ERROR")
-        
-        extension.abandonedEnabled.convention(true)
-        extension.abandonedConsole.convention(true)
-        extension.abandonedLevel.convention("ERROR")
-        extension.abandonedThresholdDays.convention(730)
-
-        // Set cacheDir convention from environment variable or default
+        // Set cacheDir convention from environment variable or default to user home
         val envCacheDirVar = project.providers.environmentVariable("LIB_INSIGHT_CACHE_DIR")
         extension.cacheDir.convention(envCacheDirVar.map { project.layout.projectDirectory.dir(it) }
-            .orElse(project.rootProject.layout.projectDirectory.dir(".gradle/lib-insight-cache")))
+            .orElse(project.providers.provider {
+                val home = System.getProperty("user.home")
+                project.layout.projectDirectory.dir("$home/.gradle/lib-insight-cache")
+            }))
 
         // Stage 1: Data Collection (Internal)
         val collectTask = project.tasks.register("libInsight", LibInsightTask::class.java, object : Action<LibInsightTask> {
@@ -44,11 +39,6 @@ class LibInsightPlugin : Plugin<Project> {
                 task.cacheTtlDays.set(extension.cacheTtlDays.convention(1))
                 task.suppressionFile.set(extension.suppressionFile)
                 task.forceNativeProgress.set(project.providers.systemProperty("progress.force").map { it.toBoolean() }.orElse(false))
-                
-                task.inputs.file(project.buildFile).withPropertyName("buildScript").optional()
-                if (project.rootProject != project) {
-                    task.inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
-                }
 
                 task.dependencyData.set(project.provider {
                     val dataMap = mutableMapOf<String, DependencyProvenance>()
@@ -60,8 +50,7 @@ class LibInsightPlugin : Plugin<Project> {
                                 if (id is ModuleComponentIdentifier) {
                                     val gav = "${id.group}:${id.module}:${id.version}"
                                     val isDirect = component.dependents.any { it.from.id == rootId }
-                                    val parents = component.dependents.map { it.from.id.toString() }.toSet()
-                                    dataMap[gav] = DependencyProvenance(isDirect, parents)
+                                    dataMap[gav] = DependencyProvenance(isDirect)
                                 }
                             }
                         }
@@ -78,11 +67,6 @@ class LibInsightPlugin : Plugin<Project> {
                 task.description = "Generates finding-based HTML and JSON reports."
                 task.dataFile.set(collectTask.flatMap { it.dataDir.file("lib-insight.json") })
                 task.reportDir.set(project.layout.buildDirectory.dir("reports/lib-insight"))
-                
-                task.inputs.file(project.buildFile).withPropertyName("buildScript").optional()
-                if (project.rootProject != project) {
-                    task.inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
-                }
 
                 task.customAudits.set(project.provider {
                     extension.customAudits.filter { it.enabled.getOrElse(true) }.map { config ->
@@ -92,12 +76,9 @@ class LibInsightPlugin : Plugin<Project> {
                 
                 task.auditFingerprint.set(project.provider {
                     val audits = extension.customAudits.filter { it.enabled.getOrElse(true) }
-                    val structural = audits.joinToString(";") { 
+                    audits.joinToString(";") { 
                         "${it.name}:${it.level.get()}:${it.console.get()}:${it.description.getOrElse("")}"
                     }
-                    val builtins = "forks:${extension.forksEnabled.get()}:${extension.forksLevel.get()}:${extension.forksConsole.get()};" +
-                                   "abandoned:${extension.abandonedEnabled.get()}:${extension.abandonedLevel.get()}:${extension.abandonedConsole.get()}:${extension.abandonedThresholdDays.get()}"
-                    "$structural|$builtins"
                 })
             }
         })
