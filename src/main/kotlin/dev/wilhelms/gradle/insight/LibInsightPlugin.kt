@@ -27,100 +27,99 @@ class LibInsightPlugin : Plugin<Project> {
             }))
 
         // Stage 1: Data Collection (Internal)
-        val collectTask = project.tasks.register("libInsight", LibInsightTask::class.java, object : Action<LibInsightTask> {
-            override fun execute(task: LibInsightTask) {
-                task.description = "Analyzes all project dependencies and collects metrics."
-                task.gitHubToken.set(extension.gitHubToken)
-                task.librariesIoToken.set(extension.librariesIoToken)
-                task.maxParallel.set(extension.maxParallelDownloads)
-                task.timeoutMinutes.set(extension.asyncTimeoutMinutes)
-                task.dataDir.set(project.layout.buildDirectory.dir("lib-insight/data"))
-                task.cacheDir.set(extension.cacheDir)
-                task.cacheTtlDays.set(extension.cacheTtlDays.convention(1))
-                task.suppressionFile.set(extension.suppressionFile)
-                
-                // Track build files for reliable incremental builds
-                task.inputs.file(project.buildFile).withPropertyName("buildScript").optional()
-                if (project.rootProject != project) {
-                    task.inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
-                }
+        val collectTask = project.tasks.register("libInsight", LibInsightTask::class.java) {
+            description = "Analyzes all project dependencies and collects metrics."
+            gitHubToken.set(extension.gitHubToken)
+            librariesIoToken.set(extension.librariesIoToken)
+            maxParallel.set(extension.maxParallelDownloads)
+            timeoutMinutes.set(extension.asyncTimeoutMinutes)
+            dataDir.set(project.layout.buildDirectory.dir("lib-insight/data"))
+            cacheDir.set(extension.cacheDir)
+            cacheTtlDays.set(extension.cacheTtlDays.convention(1))
+            suppressionFile.set(extension.suppressionFile)
+            
+            // Track build files for reliable incremental builds
+            inputs.file(project.buildFile).withPropertyName("buildScript").optional()
+            if (project.rootProject != project) {
+                inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
+            }
 
-                task.dependencyData.set(project.provider {
-                    val dataMap = mutableMapOf<String, Boolean>()
-                    project.configurations.findByName("runtimeClasspath")?.let { config ->
+            dependencyData.set(project.provider {
+                val dataMap = mutableMapOf<String, Boolean>()
+                // Try multiple common configurations
+                listOf("runtimeClasspath", "compileClasspath", "default").forEach { configName ->
+                    project.configurations.findByName(configName)?.let { config ->
                         if (config.isCanBeResolved) {
-                            val rootId = config.incoming.resolutionResult.root.id
-                            config.incoming.resolutionResult.allComponents.forEach { component ->
-                                val id = component.id
-                                if (id is ModuleComponentIdentifier) {
-                                    val gav = "${id.group}:${id.module}:${id.version}"
-                                    val isDirectDependency = component.dependents.any { it.from.id == rootId }
-                                    dataMap[gav] = isDirectDependency
+                            try {
+                                val result = config.incoming.resolutionResult
+                                val rootId = result.root.id
+                                result.allComponents.forEach { component ->
+                                    val id = component.id
+                                    if (id is ModuleComponentIdentifier) {
+                                        val gav = "${id.group}:${id.module}:${id.version}"
+                                        val isDirectDependency = component.dependents.any { it.from.id == rootId }
+                                        dataMap[gav] = isDirectDependency
+                                    }
                                 }
+                            } catch (e: Exception) {
+                                // Ignore resolution errors for individual configs
                             }
                         }
                     }
-                    dataMap
-                })
-            }
-        })
+                }
+                dataMap
+            })
+        }
 
         // Stage 2: Exception Reporting
-        val reportTask = project.tasks.register("libInsightReport", LibInsightReportTask::class.java, object : Action<LibInsightReportTask> {
-            override fun execute(task: LibInsightReportTask) {
-                task.group = "insight"
-                task.description = "Generates finding-based HTML and JSON reports."
-                task.dataFile.set(collectTask.flatMap { it.dataDir.file("lib-insight.json") })
-                task.reportDir.set(project.layout.buildDirectory.dir("reports/lib-insight"))
+        val reportTask = project.tasks.register("libInsightReport", LibInsightReportTask::class.java) {
+            group = "insight"
+            description = "Generates finding-based HTML and JSON reports."
+            dataFile.set(collectTask.flatMap { it.dataDir.file("lib-insight.json") })
+            reportDir.set(project.layout.buildDirectory.dir("reports/lib-insight"))
 
-                task.customAudits.set(project.provider {
-                    extension.customAudits.filter { it.enabled.getOrElse(true) }.map { config ->
-                        CustomAuditInfo(config.name, config.level.getOrElse("ERROR"), config.console.getOrElse(true), config.filter.get(), config.formatter.get())
-                    }
-                })
-                
-                task.auditFingerprint.set(project.provider {
-                    val audits = extension.customAudits.filter { it.enabled.getOrElse(true) }
-                    audits.joinToString(";") { 
-                        "${it.name}:${it.level.get()}:${it.console.get()}:${it.description.getOrElse("")}"
-                    }
-                })
-            }
-        })
+            customAudits.set(project.provider {
+                extension.customAudits.filter { it.enabled.getOrElse(true) }.map { config ->
+                    CustomAuditInfo(config.name, config.level.getOrElse("ERROR"), config.console.getOrElse(true), config.filter.get(), config.formatter.get())
+                }
+            })
+            
+            auditFingerprint.set(project.provider {
+                val audits = extension.customAudits.filter { it.enabled.getOrElse(true) }
+                audits.joinToString(";") { 
+                    "${it.name}:${it.level.get()}:${it.console.get()}:${it.description.getOrElse("")}"
+                }
+            })
+        }
 
         // Stage 3: CI/CD Gate
-        project.tasks.register("libInsightCheck", object : Action<Task> {
-            override fun execute(task: Task) {
-                task.group = "insight"
-                task.description = "Runs analysis and fails the build if any critical findings (ERROR) exist."
-                task.dependsOn(collectTask)
-                task.dependsOn(reportTask)
-                
-                task.doLast {
-                    val reportFile = project.layout.buildDirectory.dir("reports/lib-insight/report.json").get().asFile
-                    if (reportFile.exists()) {
-                        val gson = com.google.gson.Gson()
-                        val type = object : com.google.gson.reflect.TypeToken<List<ReportItem>>() {}.type
-                        val items: List<ReportItem> = gson.fromJson(reportFile.readText(), type)
-                        
-                        if (items.isNotEmpty()) {
-                            val hasCritical = items.any { item -> item.findings.any { f -> f.level == "ERROR" } }
-                            if (hasCritical) {
-                                throw org.gradle.api.GradleException("Library Insight found CRITICAL issues. Check the report at: ${reportFile.parentFile.absolutePath}/index.html")
-                            }
+        project.tasks.register("libInsightCheck") {
+            group = "insight"
+            description = "Runs analysis and fails the build if any critical findings (ERROR) exist."
+            dependsOn(collectTask, reportTask)
+            
+            doLast {
+                val reportFile = project.layout.buildDirectory.dir("reports/lib-insight/report.json").get().asFile
+                if (reportFile.exists()) {
+                    val gson = com.google.gson.Gson()
+                    val type = object : com.google.gson.reflect.TypeToken<List<ReportItem>>() {}.type
+                    val items: List<ReportItem> = gson.fromJson(reportFile.readText(), type)
+                    
+                    if (items.isNotEmpty()) {
+                        val hasCritical = items.any { item -> item.findings.any { f -> f.level == "ERROR" } }
+                        if (hasCritical) {
+                            throw org.gradle.api.GradleException("Library Insight found CRITICAL issues. Check the report at: ${reportFile.parentFile.absolutePath}/index.html")
                         }
                     }
                 }
             }
-        })
+        }
 
         // Initialize custom audits conventions
-        extension.customAudits.all(object : Action<CustomAuditConfiguration> {
-            override fun execute(config: CustomAuditConfiguration) {
-                config.enabled.convention(true)
-                config.console.convention(true)
-                config.level.convention("ERROR")
-            }
-        })
+        extension.customAudits.all {
+            enabled.convention(true)
+            console.convention(true)
+            level.convention("ERROR")
+        }
     }
 }

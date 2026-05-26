@@ -79,6 +79,7 @@ class LibInsightPluginTest {
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1000}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")
         cacheDir.resolve("github_repo.json").writeText("""{"full_name": "tester/dummy-lib", "stargazers_count": 10, "fork": false}""")
+        cacheDir.resolve("maven.json").writeText("""{"response":{"docs":[{"v":"1.0.0","timestamp":123}]}}""")
 
         val result = GradleRunner.create()
             .withProjectDir(testProjectDir)
@@ -125,7 +126,7 @@ class LibInsightPluginTest {
         cacheDir.mkdirs()
         cacheDir.resolve("depsdev_pkg.json").writeText("""{"dependentCount": 1000}""")
         cacheDir.resolve("depsdev_ver.json").writeText("""{"advisoryKeys": ["CVE-123"]}""")
-        cacheDir.resolve("github_repo.json").writeText("""{"full_name": "tester/dummy-lib", "stargazers_count": 10, "fork": false}""")
+        cacheDir.resolve("maven.json").writeText("""{"response":{"docs":[{"v":"1.0.0","timestamp":123}]}}""")
 
         val result = GradleRunner.create()
             .withProjectDir(testProjectDir)

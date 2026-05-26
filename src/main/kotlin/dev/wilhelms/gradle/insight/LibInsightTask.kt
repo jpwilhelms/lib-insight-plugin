@@ -111,14 +111,19 @@ abstract class LibInsightTask : DefaultTask() {
                 }
         }
 
-        // Wait for all futures with configurable timeout
-        val metrics = CompletableFuture.allOf(*allMetricsFutures.toTypedArray())
-            .thenApply { _ -> allMetricsFutures.map { it.get() } }
-            .get(timeoutMinutes.get().toLong(), TimeUnit.MINUTES)
+        // Wait for all futures safely
+        val metrics = mutableListOf<LibMetric>()
+        allMetricsFutures.forEach { future ->
+            try {
+                future.get(timeoutMinutes.get().toLong(), TimeUnit.MINUTES)?.let { metrics.add(it) }
+            } catch (e: Exception) {
+                println("Warning: Library analysis failed: ${e.message}")
+            }
+        }
         
         progress.completed()
 
-        val sortedMetrics = metrics.filterNotNull().sortedBy { it.id }
+        val sortedMetrics = metrics.sortedBy { it.id }
         generateDataFile(sortedMetrics)
         
         if (dirtyGavs.isNotEmpty()) {
@@ -243,7 +248,6 @@ abstract class LibInsightTask : DefaultTask() {
                 cachedAt = Instant.now().toString()
             )
         }.exceptionally { e ->
-            println("Error processing ${id.displayName}: ${e.message}")
             null
         }
     }
@@ -308,12 +312,13 @@ abstract class LibInsightTask : DefaultTask() {
         } catch (e: Exception) {}
         return null
     }
-private fun isFresh(file: File): Boolean {
-    if (!file.exists()) return false
-    val ttl = cacheTtlDays.getOrElse(1).toLong()
-    val expiry = Instant.now().minus(ttl, java.time.temporal.ChronoUnit.DAYS)
-    return Instant.ofEpochMilli(file.lastModified()).isAfter(expiry)
-}
+
+    private fun isFresh(file: File): Boolean {
+        if (!file.exists()) return false
+        val ttl = cacheTtlDays.getOrElse(1).toLong()
+        val expiry = Instant.now().minus(ttl, java.time.temporal.ChronoUnit.DAYS)
+        return Instant.ofEpochMilli(file.lastModified()).isAfter(expiry)
+    }
 
     private fun generateDataFile(metrics: List<LibMetric>) {
         val dataFile = dataDir.file("lib-insight.json").get().asFile

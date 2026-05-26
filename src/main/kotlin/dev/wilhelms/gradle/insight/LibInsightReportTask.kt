@@ -44,8 +44,11 @@ abstract class LibInsightReportTask : DefaultTask() {
             // Apply suppressions to findings
             val activeFindings = findings.filter { finding ->
                 metric.suppressions.none { s ->
-                    val sTasks = s.tasks ?: listOf("*")
-                    sTasks.contains("*") || sTasks.contains(finding.type)
+                    val idMatches = s.id == metric.id || s.id == "${metric.id}:${metric.version}"
+                    if (idMatches) {
+                        val sTasks = s.tasks ?: listOf("*")
+                        sTasks.contains("*") || sTasks.contains(finding.type)
+                    } else false
                 }
             }
 
