@@ -23,35 +23,34 @@ class DepsDevService(private val ctx: ServiceContext) {
             .exceptionally { null }
     }
 
-    fun fetchRaw(group: String, name: String, version: String): DepsDevRaw? {
-        try {
-            val encodedPkg = "${URLEncoder.encode(group, StandardCharsets.UTF_8)}%3A${URLEncoder.encode(name, StandardCharsets.UTF_8)}"
-            val encodedVer = URLEncoder.encode(version, StandardCharsets.UTF_8)
+    fun fetchRawAsync(group: String, name: String, version: String): CompletableFuture<DepsDevRaw?> {
+        val encodedPkg = "${URLEncoder.encode(group, StandardCharsets.UTF_8)}%3A${URLEncoder.encode(name, StandardCharsets.UTF_8)}"
+        val encodedVer = URLEncoder.encode(version, StandardCharsets.UTF_8)
+        
+        val pkgFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg")
+        val verFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg/versions/$encodedVer")
+        
+        return CompletableFuture.allOf(pkgFuture, verFuture).thenCompose {
+            val pkgJson = pkgFuture.get()
+            val verJson = verFuture.get()
             
-            // 1. Fetch package and version in parallel
-            val pkgFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg")
-            val verFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg/versions/$encodedVer")
-            
-            CompletableFuture.allOf(pkgFuture, verFuture).join()
-            
-            val pkgJson = pkgFuture.get() ?: return null
-            val verJson = verFuture.get() ?: return null
-
-            // 2. Fetch project info if available in version data
-            var projectJson: String? = null
-            val vElement = JsonParser.parseString(verJson)
-            if (vElement.isJsonObject) {
-                val vJson = vElement.asJsonObject
-                vJson.getAsJsonArray("relatedProjects")?.firstOrNull()?.let {
-                    val projectKey = it.asJsonObject.get("projectKey")?.asJsonObject?.get("id")?.asString
-                    if (projectKey != null) {
-                        projectJson = fetchUrlAsync("https://api.deps.dev/v3alpha/projects/${URLEncoder.encode(projectKey, StandardCharsets.UTF_8)}").join()
+            if (pkgJson == null || verJson == null) {
+                CompletableFuture.completedFuture(null)
+            } else {
+                // Secondary fetch for project info if available
+                var projectFuture = CompletableFuture.completedFuture<String?>(null)
+                val vElement = JsonParser.parseString(verJson)
+                if (vElement.isJsonObject) {
+                    vElement.asJsonObject.getAsJsonArray("relatedProjects")?.firstOrNull()?.let {
+                        val projectKey = it.asJsonObject.get("projectKey")?.asJsonObject?.get("id")?.asString
+                        if (projectKey != null) {
+                            projectFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/projects/${URLEncoder.encode(projectKey, StandardCharsets.UTF_8)}")
+                        }
                     }
                 }
+                projectFuture.thenApply { projJson -> DepsDevRaw(pkgJson, verJson, projJson) }
             }
-
-            return DepsDevRaw(pkgJson, verJson, projectJson)
-        } catch (e: Exception) { return null }
+        }
     }
 
     fun parse(raw: DepsDevRaw): DepsDevData? {

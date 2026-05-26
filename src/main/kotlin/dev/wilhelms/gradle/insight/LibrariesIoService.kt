@@ -11,36 +11,40 @@ import java.util.concurrent.CompletableFuture
 
 class LibrariesIoService(private val ctx: ServiceContext) {
 
-    private fun fetchUrlAsync(url: String, accept: String = "application/json"): CompletableFuture<String?> {
-        val requestBuilder = HttpRequest.newBuilder().uri(URI.create(url))
-            .timeout(Duration.ofSeconds(30))
-            .header("Accept", accept)
-            .header("User-Agent", ctx.userAgent)
-        
-        val finalUrl = if (!ctx.librariesIoToken.isNullOrBlank() && accept == "application/json") {
-            "$url?api_key=${ctx.librariesIoToken}"
-        } else url
+    fun fetchRawAsync(group: String, name: String): CompletableFuture<LibrariesIoRaw?> {
+        val encodedName = URLEncoder.encode("$group:$name", StandardCharsets.UTF_8)
+        val baseUrl = "https://libraries.io/api/maven/$encodedName"
+        val webUrl = "https://libraries.io/maven/$encodedName"
 
-        val request = requestBuilder.uri(URI.create(finalUrl)).build()
-        
-        return ctx.client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+        val finalApiUrl = if (!ctx.librariesIoToken.isNullOrBlank()) {
+            "$baseUrl?api_key=${ctx.librariesIoToken}"
+        } else baseUrl
+
+        val apiRequest = HttpRequest.newBuilder().uri(URI.create(finalApiUrl))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", "application/json")
+            .header("User-Agent", ctx.userAgent)
+            .build()
+
+        val webRequest = HttpRequest.newBuilder().uri(URI.create(webUrl))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", "text/html")
+            .header("User-Agent", ctx.userAgent)
+            .build()
+
+        val apiFuture = ctx.client.sendAsync(apiRequest, HttpResponse.BodyHandlers.ofString())
             .thenApply { if (it.statusCode() == 200) it.body() else null }
             .exceptionally { null }
-    }
 
-    fun fetchRaw(group: String, name: String): LibrariesIoRaw? {
-        val encodedName = URLEncoder.encode("$group:$name", StandardCharsets.UTF_8)
-        
-        // Parallel fetch for JSON and HTML
-        val apiFuture = fetchUrlAsync("https://libraries.io/api/maven/$encodedName")
-        val webFuture = fetchUrlAsync("https://libraries.io/maven/$encodedName", "text/html")
-        
-        CompletableFuture.allOf(apiFuture, webFuture).join()
-        
-        val apiJson = apiFuture.get() ?: return null
-        val webHtml = webFuture.get()
-        
-        return LibrariesIoRaw(apiJson, webHtml)
+        val webFuture = ctx.client.sendAsync(webRequest, HttpResponse.BodyHandlers.ofString())
+            .thenApply { if (it.statusCode() == 200) it.body() else null }
+            .exceptionally { null }
+
+        return CompletableFuture.allOf(apiFuture, webFuture).thenApply {
+            val apiJson = apiFuture.get()
+            if (apiJson == null) null
+            else LibrariesIoRaw(apiJson, webFuture.get())
+        }
     }
 
     fun parse(raw: LibrariesIoRaw): LibrariesIoData? {

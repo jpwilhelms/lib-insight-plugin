@@ -86,36 +86,38 @@ class GitHubService(private val ctx: ServiceContext) {
         } catch (e: Exception) { return null }
     }
 
-    fun fetchRaw(scmUrl: String?): GitHubRaw? {
-        if (scmUrl == null) return null
-        val pair = extractOwnerRepo(scmUrl) ?: return null
+    fun fetchRawAsync(scmUrl: String?): CompletableFuture<GitHubRaw?> {
+        if (scmUrl == null) return CompletableFuture.completedFuture(null)
+        val pair = extractOwnerRepo(scmUrl) ?: return CompletableFuture.completedFuture(null)
         val owner = pair.first
         val repo = pair.second
 
-        // 1. Initial repo fetch (needed to check if it's a fork)
-        val repoJsonStr = fetchUrlAsync("https://api.github.com/repos/$owner/$repo").join() ?: return null
-        val repoJson = JsonParser.parseString(repoJsonStr).asJsonObject
-        
-        // 2. Conditional secondary fetches in parallel
-        val issuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue")
-        
-        var compareFuture: CompletableFuture<String?>? = null
-        if (repoJson.get("fork").safeBoolean() == true) {
-            val parent = repoJson.getAsJsonObject("parent")
-            if (parent != null) {
-                val parentOwner = parent.getAsJsonObject("owner")?.get("login").safeString()
-                val parentBranch = parent.get("default_branch").safeString()
-                val myBranch = repoJson.get("default_branch").safeString()
-                if (parentOwner != null && parentBranch != null && myBranch != null) {
-                    compareFuture = fetchUrlAsync("https://api.github.com/repos/$owner/$repo/compare/$parentOwner:$parentBranch...$myBranch")
+        // Initial repo fetch (needed to check if it's a fork)
+        return fetchUrlAsync("https://api.github.com/repos/$owner/$repo").thenCompose { repoJsonStr ->
+            if (repoJsonStr == null) {
+                CompletableFuture.completedFuture<GitHubRaw?>(null)
+            } else {
+                val repoJson = JsonParser.parseString(repoJsonStr).asJsonObject
+                val issuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue")
+                
+                var compareFuture: CompletableFuture<String?>? = null
+                if (repoJson.get("fork").safeBoolean() == true) {
+                    val parent = repoJson.getAsJsonObject("parent")
+                    if (parent != null) {
+                        val parentOwner = parent.getAsJsonObject("owner")?.get("login").safeString()
+                        val parentBranch = parent.get("default_branch").safeString()
+                        val myBranch = repoJson.get("default_branch").safeString()
+                        if (parentOwner != null && parentBranch != null && myBranch != null) {
+                            compareFuture = fetchUrlAsync("https://api.github.com/repos/$owner/$repo/compare/$parentOwner:$parentBranch...$myBranch")
+                        }
+                    }
+                }
+                
+                CompletableFuture.allOf(issuesFuture, compareFuture ?: CompletableFuture.completedFuture(null)).thenApply {
+                    GitHubRaw(repoJsonStr, issuesFuture.get(), compareFuture?.get())
                 }
             }
         }
-
-        // Wait for results
-        CompletableFuture.allOf(issuesFuture, compareFuture ?: CompletableFuture.completedFuture(null)).join()
-
-        return GitHubRaw(repoJsonStr, issuesFuture.get(), compareFuture?.get())
     }
 
     fun extractOwnerRepo(url: String): Pair<String, String>? {

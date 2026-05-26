@@ -12,7 +12,7 @@ import org.gradle.api.provider.MapProperty
 import org.gradle.api.tasks.*
 import java.io.File
 import java.time.Instant
-import java.util.concurrent.Executors
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -84,42 +84,39 @@ abstract class LibInsightTask : DefaultTask() {
         val pomCache = java.util.concurrent.ConcurrentHashMap<String, File>()
         val activeSuppressions = loadSuppressions()
         
-        val metrics = java.util.Collections.synchronizedList(mutableListOf<LibMetric>())
-        val executor = Executors.newFixedThreadPool(maxParallel.get())
         val completedCount = AtomicInteger(0)
 
-        dependencies.entries.forEach { (gav, isDirectDep) ->
-            executor.submit {
-                try {
-                    val parts = gav.split(":")
-                    val id = object : ModuleComponentIdentifier {
-                        override fun getGroup() = parts[0]
-                        override fun getModule() = parts[1]
-                        override fun getVersion() = parts[2]
-                        override fun getDisplayName() = gav
-                        override fun getModuleIdentifier() = object : ModuleIdentifier {
-                            override fun getGroup() = parts[0]
-                            override fun getName() = parts[1]
-                        }
-                    }
-
-                    val metric = analyzeWithCache(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions)
-                    metrics.add(metric)
-                    
-                    val current = completedCount.incrementAndGet()
-                    progress.progress("[$current/${dependencies.size}] $gav")
-                } catch (e: Exception) {
-                    println("\nError analyzing $gav: ${e.message}")
+        // Broad Async Execution: Plan all libraries as futures
+        val allMetricsFutures = dependencies.entries.map { (gav, isDirectDep) ->
+            val parts = gav.split(":")
+            val id = object : ModuleComponentIdentifier {
+                override fun getGroup() = parts[0]
+                override fun getModule() = parts[1]
+                override fun getVersion() = parts[2]
+                override fun getDisplayName() = gav
+                override fun getModuleIdentifier() = object : ModuleIdentifier {
+                    override fun getGroup() = parts[0]
+                    override fun getName() = parts[1]
                 }
             }
+
+            // Orchestrate the chain for one library
+            analyzeWithCacheAsync(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions)
+                .thenApply { metric ->
+                    val current = completedCount.incrementAndGet()
+                    progress.progress("[$current/${dependencies.size}] $gav")
+                    metric
+                }
         }
 
-        executor.shutdown()
-        executor.awaitTermination(30, TimeUnit.MINUTES)
+        // Wait for all futures to complete
+        val metrics = CompletableFuture.allOf(*allMetricsFutures.toTypedArray())
+            .thenApply { _ -> allMetricsFutures.map { it.get() } }
+            .get(30, TimeUnit.MINUTES)
         
         progress.completed()
 
-        val sortedMetrics = metrics.toList().sortedBy { it.id }
+        val sortedMetrics = metrics.filterNotNull().sortedBy { it.id }
         generateDataFile(sortedMetrics)
         
         if (dirtyGavs.isNotEmpty()) {
@@ -139,105 +136,118 @@ abstract class LibInsightTask : DefaultTask() {
         }
     }
 
-    private fun analyzeWithCache(
+    private fun analyzeWithCacheAsync(
         baseDir: File, id: ModuleComponentIdentifier, pomCache: MutableMap<String, File>,
         ghS: GitHubService, ddS: DepsDevService, mcS: MavenCentralService, liS: LibrariesIoService,
         directDep: Boolean, activeSuppressions: List<Suppression>
-    ): LibMetric {
+    ): CompletableFuture<LibMetric?> {
         val dir = File(baseDir, "v$CACHE_VERSION/${id.group}/${id.module}/${id.version}")
         dir.mkdirs()
 
-        // --- POM & License ---
+        // 1. Initial POM & SCM URL (Still mostly sequential/cached)
         val pomFile = findInheritedPom(id, pomCache)
         val scmUrl = extractScmUrl(pomFile, id)
         val license = pomFile?.let { extractLicense(it) }
 
-        // --- Maven Central ---
+        // 2. Schedule all provider fetches in parallel
+        
+        // Maven Central
         val mcFile = File(dir, "maven.json")
-        val mcRaw = if (isFresh(mcFile)) mcFile.readText() else mcS.fetchRaw(id.group, id.module)?.also { mcFile.writeText(it) }
-        val mcData = mcRaw?.let { mcS.parse(it, id.version) }
+        val mcFuture = if (isFresh(mcFile)) {
+            CompletableFuture.completedFuture(mcFile.readText())
+        } else {
+            mcS.fetchRawAsync(id.group, id.module).thenApply { res ->
+                res?.also { mcFile.writeText(it) }
+            }
+        }
 
-        // --- GitHub ---
-        var githubData: GitHubData? = null
-        if (scmUrl != null) {
-            val ghRepoFile = File(dir, "github_repo.json")
-            val ghIssuesFile = File(dir, "github_issues.json")
-            val ghCompareFile = File(dir, "github_compare.json")
-            if (!isFresh(ghRepoFile)) {
-                ghS.fetchRaw(scmUrl)?.also { 
+        // GitHub
+        val ghRepoFile = File(dir, "github_repo.json")
+        val ghIssuesFile = File(dir, "github_issues.json")
+        val ghCompareFile = File(dir, "github_compare.json")
+        val ghFuture = if (isFresh(ghRepoFile)) {
+            val raw = GitHubRaw(
+                repoJson = ghRepoFile.readText(),
+                issuesJson = if (ghIssuesFile.exists()) ghIssuesFile.readText() else null,
+                compareJson = if (ghCompareFile.exists()) ghCompareFile.readText() else null
+            )
+            CompletableFuture.completedFuture(raw)
+        } else if (scmUrl != null) {
+            ghS.fetchRawAsync(scmUrl).thenApply { res ->
+                res?.also {
                     ghRepoFile.writeText(it.repoJson)
                     it.issuesJson?.let { issues -> ghIssuesFile.writeText(issues) }
                     it.compareJson?.let { comp -> ghCompareFile.writeText(comp) }
                 }
             }
-            
-            if (ghRepoFile.exists()) {
-                val raw = GitHubRaw(
-                    repoJson = ghRepoFile.readText(),
-                    issuesJson = if (ghIssuesFile.exists()) ghIssuesFile.readText() else null,
-                    compareJson = if (ghCompareFile.exists()) ghCompareFile.readText() else null
-                )
-                githubData = ghS.parse(raw)
-            }
-        }
+        } else CompletableFuture.completedFuture(null)
 
-        // --- Deps.dev ---
+        // Deps.dev
         val ddPkgFile = File(dir, "depsdev_pkg.json")
         val ddVerFile = File(dir, "depsdev_ver.json")
         val ddProjFile = File(dir, "depsdev_proj.json")
-        if (!isFresh(ddPkgFile)) {
-            ddS.fetchRaw(id.group, id.module, id.version)?.also {
-                ddPkgFile.writeText(it.packageJson)
-                ddVerFile.writeText(it.versionJson)
-                it.projectJson?.let { proj -> ddProjFile.writeText(proj) }
-            }
-        }
-        
-        var depsDevData: DepsDevData? = null
-        if (ddPkgFile.exists() && ddVerFile.exists()) {
+        val ddFuture = if (isFresh(ddPkgFile)) {
             val raw = DepsDevRaw(
                 packageJson = ddPkgFile.readText(),
                 versionJson = ddVerFile.readText(),
                 projectJson = if (ddProjFile.exists()) ddProjFile.readText() else null
             )
-            depsDevData = ddS.parse(raw)
-        }
-
-        // --- Libraries.io ---
-        val liFile = File(dir, "libsio_api.json")
-        val liWebFile = File(dir, "libsio_web.html")
-        if (!isFresh(liFile)) {
-            liS.fetchRaw(id.group, id.module)?.also {
-                liFile.writeText(it.apiJson)
-                it.webHtml?.let { html -> liWebFile.writeText(html) }
+            CompletableFuture.completedFuture(raw)
+        } else {
+            ddS.fetchRawAsync(id.group, id.module, id.version).thenApply { res ->
+                res?.also {
+                    ddPkgFile.writeText(it.packageJson)
+                    ddVerFile.writeText(it.versionJson)
+                    it.projectJson?.let { proj -> ddProjFile.writeText(proj) }
+                }
             }
         }
-        
-        var librariesIoData: LibrariesIoData? = null
-        if (liFile.exists()) {
+
+        // Libraries.io
+        val liFile = File(dir, "libsio_api.json")
+        val liWebFile = File(dir, "libsio_web.html")
+        val liFuture = if (isFresh(liFile)) {
             val raw = LibrariesIoRaw(
                 apiJson = liFile.readText(),
                 webHtml = if (liWebFile.exists()) liWebFile.readText() else null
             )
-            librariesIoData = liS.parse(raw)
+            CompletableFuture.completedFuture(raw)
+        } else {
+            liS.fetchRawAsync(id.group, id.module).thenApply { res ->
+                res?.also {
+                    liFile.writeText(it.apiJson)
+                    it.webHtml?.let { html -> liWebFile.writeText(html) }
+                }
+            }
         }
 
-        val groupPath = id.group.replace('.', '/')
-        val pomUrl = "https://repo1.maven.org/maven2/${groupPath}/${id.module}/${id.version}/${id.module}-${id.version}.pom"
+        // 3. Combine everything into the final metric
+        return CompletableFuture.allOf(mcFuture, ghFuture, ddFuture, liFuture).thenApply {
+            val mcData = mcFuture.get()?.let { mcS.parse(it, id.version) }
+            val ghData = ghFuture.get()?.let { ghS.parse(it) }
+            val ddData = ddFuture.get()?.let { ddS.parse(it) }
+            val liData = liFuture.get()?.let { liS.parse(it) }
 
-        return LibMetric(
-            id = "${id.group}:${id.module}",
-            version = id.version,
-            gradleInsight = "findings",
-            isDirect = directDep,
-            suppressions = activeSuppressions,
-            pom = PomInfo(pomUrl, license, scmUrl),
-            mavenCentral = mcData,
-            github = githubData,
-            depsDev = depsDevData,
-            librariesIo = librariesIoData,
-            cachedAt = Instant.now().toString()
-        )
+            val groupPath = id.group.replace('.', '/')
+            val pomUrl = "https://repo1.maven.org/maven2/${groupPath}/${id.module}/${id.version}/${id.module}-${id.version}.pom"
+
+            LibMetric(
+                id = "${id.group}:${id.module}",
+                version = id.version,
+                gradleInsight = "findings",
+                isDirect = directDep,
+                suppressions = activeSuppressions,
+                pom = PomInfo(pomUrl, license, scmUrl),
+                mavenCentral = mcData,
+                github = ghData,
+                depsDev = ddData,
+                librariesIo = liData,
+                cachedAt = Instant.now().toString()
+            )
+        }.exceptionally { e ->
+            println("Error processing ${id.displayName}: ${e.message}")
+            null
+        }
     }
 
     private fun findInheritedPom(id: ModuleComponentIdentifier, cache: MutableMap<String, File>): File? {

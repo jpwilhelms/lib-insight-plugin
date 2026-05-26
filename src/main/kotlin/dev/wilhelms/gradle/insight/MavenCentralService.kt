@@ -8,51 +8,53 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 
 class MavenCentralService(private val ctx: ServiceContext) {
 
     private val formatter = DateTimeFormatter.ISO_INSTANT.withZone(ZoneOffset.UTC)
 
-    fun fetchRaw(group: String, name: String): String? {
-        try {
-            val url = "https://search.maven.org/solrsearch/select?q=g:\"$group\"+AND+a:\"$name\"&core=gav&rows=100&wt=json"
-            val request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("Accept", "application/json")
-                .header("User-Agent", ctx.userAgent)
-                .build()
-            val response = ctx.client.send(request, HttpResponse.BodyHandlers.ofString())
-            return if (response.statusCode() == 200) response.body() else null
-        } catch (e: Exception) { return null }
+    fun fetchRawAsync(group: String, name: String): CompletableFuture<String?> {
+        val url = "https://search.maven.org/solrsearch/select?q=g:\"$group\"+AND+a:\"$name\"&core=gav&rows=100&wt=json"
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", "application/json")
+            .header("User-Agent", ctx.userAgent)
+            .build()
+        
+        return ctx.client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply { if (it.statusCode() == 200) it.body() else null }
+            .exceptionally { null }
     }
 
-    fun parse(rawJson: String, version: String): MavenCentralData? {
+    fun parse(jsonStr: String, currentVersion: String): MavenCentralData? {
         try {
-            val element = JsonParser.parseString(rawJson)
+            val element = JsonParser.parseString(jsonStr)
             if (!element.isJsonObject) return null
-            val json = element.asJsonObject
-            val docs = json.getAsJsonObject("response").getAsJsonArray("docs")
-            var currentVersionDate: String? = null
-            var latestVersion: String? = null
+            val response = element.asJsonObject.getAsJsonObject("response")
+            val docs = response.getAsJsonArray("docs")
+            
+            var currentVersionDate: Long = 0
             var latestDate: Long = 0
+            var latestVersion: String? = null
 
-            docs.forEach { docElement ->
-                if (docElement.isJsonObject) {
-                    val doc = docElement.asJsonObject
-                    val v = doc.get("v").safeString()
-                    val timestamp = doc.get("timestamp").safeLong()
-                    if (v != null && timestamp != null) {
-                        if (v == version) currentVersionDate = formatter.format(Instant.ofEpochMilli(timestamp))
-                        if (timestamp > latestDate) {
-                            latestDate = timestamp
-                            latestVersion = v
-                        }
-                    }
+            docs.forEach { docElem ->
+                val doc = docElem.asJsonObject
+                val v = doc.get("v").asString
+                val t = doc.get("timestamp").asLong
+                
+                if (v == currentVersion) {
+                    currentVersionDate = t
+                }
+                if (t > latestDate) {
+                    latestDate = t
+                    latestVersion = v
                 }
             }
+
             return MavenCentralData(
-                currentVersionReleaseDate = currentVersionDate,
+                currentVersionReleaseDate = if (currentVersionDate > 0) formatter.format(Instant.ofEpochMilli(currentVersionDate)) else null,
                 latestVersion = latestVersion,
                 latestVersionReleaseDate = if (latestDate > 0) formatter.format(Instant.ofEpochMilli(latestDate)) else null,
                 releaseCount = docs.size()

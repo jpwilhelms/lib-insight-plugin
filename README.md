@@ -8,6 +8,7 @@ The Library Insight plugin analyzes project dependencies and provides quality as
 ## Features
 *   **Dependency Analysis:** Scans your dependency graph and identifies potential risks.
 *   **Provider Integration:** Aggregates data from GitHub, Deps.dev (OpenSSF Scorecard), and Maven Central.
+*   **High Performance:** Broad asynchronous execution model for maximum API throughput.
 *   **Structured Reporting:** HTML and JSON reports grouped by severity (Critical, Warning, Info).
 *   **Custom Audits:** Flexible DSL to define your own quality gates.
 *   **CI/CD Governance:** Build failure logic based on identified critical findings.
@@ -32,7 +33,7 @@ The plugin comes with no hardcoded audits enabled by default. Use the following 
 libInsight {
     autoCheck = true
     
-    // Path to optional suppressions file
+    // Optional: Path to suppressions file
     suppressionFile = file("lib-insight-suppressions.json")
 
     customAudits {
@@ -81,21 +82,9 @@ libInsight {
 | `gitHubToken` | `GH_TOKEN` | - | GitHub Personal Access Token for higher rate limits. |
 | `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
 | `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Shared metadata cache directory. |
+| `cacheTtlDays` | - | `1` | Cache validity in days. Set to `-1` for infinite cache. |
 | `suppressionFile` | - | - | JSON file containing findings to ignore. |
 | `autoCheck` | - | `false` | If `true`, hooks `libInsightCheck` into the standard `check` task. |
-
----
-
-## Audit Configuration
-
-Each custom audit supports the following properties:
-
-| Property | Default | Description |
-| :--- | :--- | :--- |
-| `level` | `"ERROR"` | Severity of the finding. <br>• **`ERROR`**: Findings appear in "Critical Issues" and **fail the build**. <br>• **`WARN`**: Findings appear in "Warnings", visible but non-blocking. <br>• **`INFO`**: Findings appear in "Information" section. |
-| `console`| `true` | If `true`, findings are printed to the terminal during build. |
-| `description` | - | Optional description of the audit's purpose. |
-| `enabled` | `true` | If `false`, the audit is skipped. |
 
 ---
 
