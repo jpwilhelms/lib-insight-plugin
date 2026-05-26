@@ -7,29 +7,37 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.net.URLEncoder
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 
 class DepsDevService(private val ctx: ServiceContext) {
 
-    private fun fetchUrl(url: String): String? {
-        try {
-            val request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("Accept", "application/json")
-                .header("User-Agent", ctx.userAgent)
-                .build()
-            val response = ctx.client.send(request, HttpResponse.BodyHandlers.ofString())
-            return if (response.statusCode() == 200) response.body() else null
-        } catch (e: Exception) { return null }
+    private fun fetchUrlAsync(url: String): CompletableFuture<String?> {
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", "application/json")
+            .header("User-Agent", ctx.userAgent)
+            .build()
+        return ctx.client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply { if (it.statusCode() == 200) it.body() else null }
+            .exceptionally { null }
     }
 
     fun fetchRaw(group: String, name: String, version: String): DepsDevRaw? {
         try {
-            val pkgJson = fetchUrl("https://api.deps.dev/v3alpha/systems/maven/packages/${URLEncoder.encode(group, StandardCharsets.UTF_8)}%3A${URLEncoder.encode(name, StandardCharsets.UTF_8)}") ?: return null
+            val encodedPkg = "${URLEncoder.encode(group, StandardCharsets.UTF_8)}%3A${URLEncoder.encode(name, StandardCharsets.UTF_8)}"
+            val encodedVer = URLEncoder.encode(version, StandardCharsets.UTF_8)
             
-            val encodedVersion = URLEncoder.encode(version, StandardCharsets.UTF_8)
-            val verJson = fetchUrl("https://api.deps.dev/v3alpha/systems/maven/packages/${URLEncoder.encode(group, StandardCharsets.UTF_8)}%3A${URLEncoder.encode(name, StandardCharsets.UTF_8)}/versions/$encodedVersion") ?: return null
+            // 1. Fetch package and version in parallel
+            val pkgFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg")
+            val verFuture = fetchUrlAsync("https://api.deps.dev/v3alpha/systems/maven/packages/$encodedPkg/versions/$encodedVer")
+            
+            CompletableFuture.allOf(pkgFuture, verFuture).join()
+            
+            val pkgJson = pkgFuture.get() ?: return null
+            val verJson = verFuture.get() ?: return null
 
+            // 2. Fetch project info if available in version data
             var projectJson: String? = null
             val vElement = JsonParser.parseString(verJson)
             if (vElement.isJsonObject) {
@@ -37,7 +45,7 @@ class DepsDevService(private val ctx: ServiceContext) {
                 vJson.getAsJsonArray("relatedProjects")?.firstOrNull()?.let {
                     val projectKey = it.asJsonObject.get("projectKey")?.asJsonObject?.get("id")?.asString
                     if (projectKey != null) {
-                        projectJson = fetchUrl("https://api.deps.dev/v3alpha/projects/${URLEncoder.encode(projectKey, StandardCharsets.UTF_8)}")
+                        projectJson = fetchUrlAsync("https://api.deps.dev/v3alpha/projects/${URLEncoder.encode(projectKey, StandardCharsets.UTF_8)}").join()
                     }
                 }
             }

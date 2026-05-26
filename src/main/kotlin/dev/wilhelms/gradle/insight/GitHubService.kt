@@ -7,24 +7,24 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 
 class GitHubService(private val ctx: ServiceContext) {
 
-    private fun fetchUrl(url: String): String? {
-        try {
-            val requestBuilder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("Accept", "application/vnd.github.v3+json")
-                .header("User-Agent", ctx.userAgent)
-            if (!ctx.githubToken.isNullOrBlank()) {
-                requestBuilder.header("Authorization", "token ${ctx.githubToken}")
-            }
-            val response = ctx.client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
-            return if (response.statusCode() == 200) response.body() else null
-        } catch (e: Exception) { 
-            return null 
+    private fun fetchUrlAsync(url: String): CompletableFuture<String?> {
+        val requestBuilder = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", ctx.userAgent)
+        
+        if (!ctx.githubToken.isNullOrBlank()) {
+            requestBuilder.header("Authorization", "token ${ctx.githubToken}")
         }
+        
+        return ctx.client.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+            .thenApply { if (it.statusCode() == 200) it.body() else null }
+            .exceptionally { null }
     }
 
     fun parse(raw: GitHubRaw): GitHubData? {
@@ -92,12 +92,14 @@ class GitHubService(private val ctx: ServiceContext) {
         val owner = pair.first
         val repo = pair.second
 
-        val repoJsonStr = fetchUrl("https://api.github.com/repos/$owner/$repo") ?: return null
-        val repoElement = JsonParser.parseString(repoJsonStr)
-        if (!repoElement.isJsonObject) return null
-        val repoJson = repoElement.asJsonObject
+        // 1. Initial repo fetch (needed to check if it's a fork)
+        val repoJsonStr = fetchUrlAsync("https://api.github.com/repos/$owner/$repo").join() ?: return null
+        val repoJson = JsonParser.parseString(repoJsonStr).asJsonObject
         
-        var compareJson: String? = null
+        // 2. Conditional secondary fetches in parallel
+        val issuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue")
+        
+        var compareFuture: CompletableFuture<String?>? = null
         if (repoJson.get("fork").safeBoolean() == true) {
             val parent = repoJson.getAsJsonObject("parent")
             if (parent != null) {
@@ -105,14 +107,15 @@ class GitHubService(private val ctx: ServiceContext) {
                 val parentBranch = parent.get("default_branch").safeString()
                 val myBranch = repoJson.get("default_branch").safeString()
                 if (parentOwner != null && parentBranch != null && myBranch != null) {
-                    compareJson = fetchUrl("https://api.github.com/repos/$owner/$repo/compare/$parentOwner:$parentBranch...$myBranch")
+                    compareFuture = fetchUrlAsync("https://api.github.com/repos/$owner/$repo/compare/$parentOwner:$parentBranch...$myBranch")
                 }
             }
         }
 
-        val issuesJson = fetchUrl("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue")
+        // Wait for results
+        CompletableFuture.allOf(issuesFuture, compareFuture ?: CompletableFuture.completedFuture(null)).join()
 
-        return GitHubRaw(repoJsonStr, issuesJson, compareJson)
+        return GitHubRaw(repoJsonStr, issuesFuture.get(), compareFuture?.get())
     }
 
     fun extractOwnerRepo(url: String): Pair<String, String>? {

@@ -88,7 +88,7 @@ abstract class LibInsightTask : DefaultTask() {
         val executor = Executors.newFixedThreadPool(maxParallel.get())
         val completedCount = AtomicInteger(0)
 
-        dependencies.entries.forEach { (gav, isDirect) ->
+        dependencies.entries.forEach { (gav, isDirectDep) ->
             executor.submit {
                 try {
                     val parts = gav.split(":")
@@ -103,7 +103,7 @@ abstract class LibInsightTask : DefaultTask() {
                         }
                     }
 
-                    val metric = analyzeWithCache(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirect, activeSuppressions)
+                    val metric = analyzeWithCache(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions)
                     metrics.add(metric)
                     
                     val current = completedCount.incrementAndGet()
@@ -142,7 +142,7 @@ abstract class LibInsightTask : DefaultTask() {
     private fun analyzeWithCache(
         baseDir: File, id: ModuleComponentIdentifier, pomCache: MutableMap<String, File>,
         ghS: GitHubService, ddS: DepsDevService, mcS: MavenCentralService, liS: LibrariesIoService,
-        isDirect: Boolean, activeSuppressions: List<Suppression>
+        directDep: Boolean, activeSuppressions: List<Suppression>
     ): LibMetric {
         val dir = File(baseDir, "v$CACHE_VERSION/${id.group}/${id.module}/${id.version}")
         dir.mkdirs()
@@ -229,7 +229,7 @@ abstract class LibInsightTask : DefaultTask() {
             id = "${id.group}:${id.module}",
             version = id.version,
             gradleInsight = "findings",
-            isDirect = isDirect,
+            isDirect = directDep,
             suppressions = activeSuppressions,
             pom = PomInfo(pomUrl, license, scmUrl),
             mavenCentral = mcData,

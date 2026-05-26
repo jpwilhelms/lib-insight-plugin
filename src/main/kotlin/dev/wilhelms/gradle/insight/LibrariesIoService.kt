@@ -7,41 +7,40 @@ import java.net.http.HttpResponse
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 
 class LibrariesIoService(private val ctx: ServiceContext) {
 
-    private fun fetchUrl(url: String): String? {
-        try {
-            val requestBuilder = HttpRequest.newBuilder().uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("Accept", "application/json")
-                .header("User-Agent", ctx.userAgent)
-            if (!ctx.librariesIoToken.isNullOrBlank()) {
-                requestBuilder.uri(URI.create("$url?api_key=${ctx.librariesIoToken}"))
-            }
-            val response = ctx.client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
-            return if (response.statusCode() == 200) response.body() else null
-        } catch (e: Exception) { return null }
-    }
+    private fun fetchUrlAsync(url: String, accept: String = "application/json"): CompletableFuture<String?> {
+        val requestBuilder = HttpRequest.newBuilder().uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .header("Accept", accept)
+            .header("User-Agent", ctx.userAgent)
+        
+        val finalUrl = if (!ctx.librariesIoToken.isNullOrBlank() && accept == "application/json") {
+            "$url?api_key=${ctx.librariesIoToken}"
+        } else url
 
-    private fun fetchHtml(url: String): String? {
-        try {
-            val request = HttpRequest.newBuilder().uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("User-Agent", ctx.userAgent)
-                .build()
-            val response = ctx.client.send(request, HttpResponse.BodyHandlers.ofString())
-            return if (response.statusCode() == 200) response.body() else null
-        } catch (e: Exception) { return null }
+        val request = requestBuilder.uri(URI.create(finalUrl)).build()
+        
+        return ctx.client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply { if (it.statusCode() == 200) it.body() else null }
+            .exceptionally { null }
     }
 
     fun fetchRaw(group: String, name: String): LibrariesIoRaw? {
-        try {
-            val encodedName = URLEncoder.encode("$group:$name", StandardCharsets.UTF_8)
-            val apiJson = fetchUrl("https://libraries.io/api/maven/$encodedName") ?: return null
-            val webHtml = fetchHtml("https://libraries.io/maven/$encodedName")
-            return LibrariesIoRaw(apiJson, webHtml)
-        } catch (e: Exception) { return null }
+        val encodedName = URLEncoder.encode("$group:$name", StandardCharsets.UTF_8)
+        
+        // Parallel fetch for JSON and HTML
+        val apiFuture = fetchUrlAsync("https://libraries.io/api/maven/$encodedName")
+        val webFuture = fetchUrlAsync("https://libraries.io/maven/$encodedName", "text/html")
+        
+        CompletableFuture.allOf(apiFuture, webFuture).join()
+        
+        val apiJson = apiFuture.get() ?: return null
+        val webHtml = webFuture.get()
+        
+        return LibrariesIoRaw(apiJson, webHtml)
     }
 
     fun parse(raw: LibrariesIoRaw): LibrariesIoData? {
@@ -64,7 +63,7 @@ class LibrariesIoService(private val ctx: ServiceContext) {
                 dependentsCount = json.get("dependents_count").safeInt() ?: 0,
                 dependentReposCount = json.get("dependent_repos_count").safeInt() ?: 0,
                 sourcerank = json.get("rank").safeInt() ?: 0,
-                averageReleaseFrequency = null, // Future improvement
+                averageReleaseFrequency = null,
                 sourcerankBreakdown = breakdown
             )
         } catch (e: Exception) { return null }

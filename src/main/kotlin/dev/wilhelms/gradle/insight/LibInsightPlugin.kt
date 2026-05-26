@@ -5,6 +5,7 @@ import org.gradle.api.Project
 import org.gradle.api.Action
 import org.gradle.api.Task
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import java.io.File
 
 class LibInsightPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -53,8 +54,8 @@ class LibInsightPlugin : Plugin<Project> {
                                 val id = component.id
                                 if (id is ModuleComponentIdentifier) {
                                     val gav = "${id.group}:${id.module}:${id.version}"
-                                    val isDirect = component.dependents.any { it.from.id == rootId }
-                                    dataMap[gav] = isDirect
+                                    val isDirectDependency = component.dependents.any { it.from.id == rootId }
+                                    dataMap[gav] = isDirectDependency
                                 }
                             }
                         }
