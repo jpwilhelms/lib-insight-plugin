@@ -5,6 +5,7 @@ plugins {
     `signing`
     id("org.jetbrains.dokka") version "1.9.10"
     id("com.gradleup.nmcp") version "0.0.9"
+    id("com.gradle.plugin-publish") version "1.2.1"
 }
 
 group = "dev.wilhelms.gradle"
@@ -33,7 +34,8 @@ java {
 gradlePlugin {
     website.set("https://github.com/jpwilhelms/lib-insight-plugin")
     vcsUrl.set("https://github.com/jpwilhelms/lib-insight-plugin.git")
-    isAutomatedPublishing = false // We use NMCP for publishing
+    
+    // Portal publication settings
     plugins {
         create("libInsightPlugin") {
             id = "dev.wilhelms.gradle.lib-insight"
