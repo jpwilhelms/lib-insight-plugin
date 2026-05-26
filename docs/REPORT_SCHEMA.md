@@ -14,11 +14,11 @@ This file contains the complete set of metadata collected for every dependency.
 | `id` | `String` | GAV coordinates without version (`group:artifact`) |
 | `version` | `String` | The used version string |
 | `isDirect` | `Boolean` | True if explicitly declared in the project |
-| `requestedBy` | `List<String>`| GAVs of dependencies that pulled this library in |
 | `cacheTime` | `Instant` | When this data was last collected/cached |
 | `mavenCentral`| `Object?` | Data from Maven Central (see below) |
 | `github` | `Object?` | Data from GitHub (see below) |
 | `depsDev` | `Object?` | Data from Google deps.dev (see below) |
+| `librariesIo` | `Object?` | Data from Libraries.io (see below) |
 
 ---
 
@@ -76,6 +76,17 @@ This file contains the complete set of metadata collected for every dependency.
 
 ---
 
+### Libraries.io (`librariesIo`)
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `sourcerank` | `Int` | Combined popularity and quality score |
+| `dependentReposCount` | `Int` | Number of repositories depending on this project |
+| `dependentsCount` | `Int` | Total number of dependents (including packages) |
+| `sourcerankBreakdown` | `Map<String, Int>` | Detailed components of the SourceRank score |
+
+---
+
 ## 2. Findings Report (`report.json`)
 Located at: `build/reports/lib-insight/report.json`
 
@@ -101,4 +112,3 @@ This file is a filtered view of the metadata, containing only items with identif
 *   `ERROR`: Critical finding, will trigger build failure in `libInsightCheck`.
 *   `WARN`: Warning, visible in reports but non-blocking.
 *   `INFO`: Informational finding, grouped in the lowest priority section.
-

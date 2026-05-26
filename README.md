@@ -7,7 +7,7 @@ The Library Insight plugin analyzes project dependencies and provides quality as
 
 ## Features
 *   **Dependency Analysis:** Scans your dependency graph and identifies potential risks.
-*   **Provider Integration:** Aggregates data from GitHub, Deps.dev (OpenSSF Scorecard), and Maven Central.
+*   **Provider Integration:** Aggregates data from GitHub, Deps.dev (OpenSSF Scorecard), Libraries.io, and Maven Central.
 *   **High Performance:** Broad asynchronous execution model for maximum API throughput.
 *   **Structured Reporting:** HTML and JSON reports grouped by severity (Critical, Warning, Info).
 *   **Custom Audits:** Flexible DSL to define your own quality gates.
