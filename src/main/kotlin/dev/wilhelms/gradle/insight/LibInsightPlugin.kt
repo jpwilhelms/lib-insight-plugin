@@ -5,7 +5,6 @@ import org.gradle.api.Project
 import org.gradle.api.Action
 import org.gradle.api.Task
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import java.io.File
 
 class LibInsightPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -38,10 +37,15 @@ class LibInsightPlugin : Plugin<Project> {
                 task.cacheDir.set(extension.cacheDir)
                 task.cacheTtlDays.set(extension.cacheTtlDays.convention(1))
                 task.suppressionFile.set(extension.suppressionFile)
-                task.forceNativeProgress.set(project.providers.systemProperty("progress.force").map { it.toBoolean() }.orElse(false))
+                
+                // Track build files for reliable incremental builds
+                task.inputs.file(project.buildFile).withPropertyName("buildScript").optional()
+                if (project.rootProject != project) {
+                    task.inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
+                }
 
                 task.dependencyData.set(project.provider {
-                    val dataMap = mutableMapOf<String, DependencyProvenance>()
+                    val dataMap = mutableMapOf<String, Boolean>()
                     project.configurations.findByName("runtimeClasspath")?.let { config ->
                         if (config.isCanBeResolved) {
                             val rootId = config.incoming.resolutionResult.root.id
@@ -50,7 +54,7 @@ class LibInsightPlugin : Plugin<Project> {
                                 if (id is ModuleComponentIdentifier) {
                                     val gav = "${id.group}:${id.module}:${id.version}"
                                     val isDirect = component.dependents.any { it.from.id == rootId }
-                                    dataMap[gav] = DependencyProvenance(isDirect)
+                                    dataMap[gav] = isDirect
                                 }
                             }
                         }

@@ -43,11 +43,7 @@ abstract class LibInsightTask : DefaultTask() {
     abstract val suppressionFile: RegularFileProperty
 
     @get:Input
-    abstract val dependencyData: MapProperty<String, DependencyProvenance>
-
-    @get:Input
-    @get:Optional
-    abstract val forceNativeProgress: Property<Boolean>
+    abstract val dependencyData: MapProperty<String, Boolean>
 
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -56,7 +52,7 @@ abstract class LibInsightTask : DefaultTask() {
         val dependencies = dependencyData.get()
         val envCacheDir = cacheDir.get().asFile
         
-        // 1. Check what actually needs fetching
+        // Check what actually needs fetching
         val dirtyGavs = dependencies.keys.filter { gav ->
             val parts = gav.split(":")
             val dir = File(envCacheDir, "v$CACHE_VERSION/${parts[0]}/${parts[1]}/${parts[2]}")
@@ -76,11 +72,9 @@ abstract class LibInsightTask : DefaultTask() {
             println("Analyzing ${dependencies.size} dependencies (${dirtyGavs.size} need update, Parallelism: ${maxParallel.get()})...")
         }
 
-        // 2. Setup ProgressLogger via decoupled library
-        val progress = ProgressLogger(project, javaClass, forceNativeProgress.getOrElse(false))
+        val progress = ProgressLogger(project, javaClass)
         progress.start("Analyzing dependencies", "lib-insight")
 
-        // 3. Setup services and pool
         val ctx = ServiceContext(gitHubToken.getOrNull(), librariesIoToken.getOrNull())
         val githubService = GitHubService(ctx)
         val depsDevService = DepsDevService(ctx)
@@ -94,7 +88,7 @@ abstract class LibInsightTask : DefaultTask() {
         val executor = Executors.newFixedThreadPool(maxParallel.get())
         val completedCount = AtomicInteger(0)
 
-        dependencies.entries.forEach { (gav, provenance) ->
+        dependencies.entries.forEach { (gav, isDirect) ->
             executor.submit {
                 try {
                     val parts = gav.split(":")
@@ -109,12 +103,11 @@ abstract class LibInsightTask : DefaultTask() {
                         }
                     }
 
-                    val metric = analyzeWithCache(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, provenance, activeSuppressions)
+                    val metric = analyzeWithCache(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirect, activeSuppressions)
                     metrics.add(metric)
                     
                     val current = completedCount.incrementAndGet()
                     progress.progress("[$current/${dependencies.size}] $gav")
-                    
                 } catch (e: Exception) {
                     println("\nError analyzing $gav: ${e.message}")
                 }
@@ -149,7 +142,7 @@ abstract class LibInsightTask : DefaultTask() {
     private fun analyzeWithCache(
         baseDir: File, id: ModuleComponentIdentifier, pomCache: MutableMap<String, File>,
         ghS: GitHubService, ddS: DepsDevService, mcS: MavenCentralService, liS: LibrariesIoService,
-        provenance: DependencyProvenance, activeSuppressions: List<Suppression>
+        isDirect: Boolean, activeSuppressions: List<Suppression>
     ): LibMetric {
         val dir = File(baseDir, "v$CACHE_VERSION/${id.group}/${id.module}/${id.version}")
         dir.mkdirs()
@@ -236,7 +229,7 @@ abstract class LibInsightTask : DefaultTask() {
             id = "${id.group}:${id.module}",
             version = id.version,
             gradleInsight = "findings",
-            isDirect = provenance.isDirect,
+            isDirect = isDirect,
             suppressions = activeSuppressions,
             pom = PomInfo(pomUrl, license, scmUrl),
             mavenCentral = mcData,

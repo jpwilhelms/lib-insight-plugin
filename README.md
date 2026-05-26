@@ -80,7 +80,7 @@ libInsight {
 | :--- | :--- | :--- | :--- |
 | `gitHubToken` | `GH_TOKEN` | - | GitHub Personal Access Token for higher rate limits. |
 | `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
-| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Directory for raw API response metadata. |
+| `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Shared metadata cache directory. |
 | `suppressionFile` | - | - | JSON file containing findings to ignore. |
 | `autoCheck` | - | `false` | If `true`, hooks `libInsightCheck` into the standard `check` task. |
 
@@ -104,7 +104,7 @@ Each custom audit supports the following properties:
 Library Insight produces detailed reports in the build directory. For a full description of the available fields in `LibMetric` (to be used in your `filter` and `format` closures), please refer to the **[JSON Report Schema](docs/REPORT_SCHEMA.md)**.
 
 ### Suppressions
-You can suppress specific findings by providing a JSON file:
+You can suppress specific findings by providing a JSON file (`suppressionFile` property):
 ```json
 [
   {
@@ -117,7 +117,7 @@ You can suppress specific findings by providing a JSON file:
 
 ## Tasks
 
-*   `libInsightReport`: **Reporting.** Evaluates all audits and generates findings-based reports.
+*   `libInsightReport`: **Reporting.** Evaluates all audits and generates findings-based HTML/JSON reports.
 *   `libInsightCheck`: **Governance.** Runs analysis and fails the build if any `ERROR` level findings exist.
 
 ## License

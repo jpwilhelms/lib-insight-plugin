@@ -99,10 +99,6 @@ data class LibMetric(
     val cacheTime: Instant? get() = try { Instant.parse(cachedAt) } catch(e: Exception) { null }
 }
 
-data class DependencyProvenance(
-    val isDirect: Boolean
-) : Serializable
-
 data class Suppression(
     val id: String,
     val reason: String,
