@@ -28,7 +28,7 @@ class LibInsightPlugin : Plugin<Project> {
 
         // Stage 1: Data Collection (Internal)
         val collectTask = project.tasks.register("libInsight", LibInsightTask::class.java) {
-            description = "Analyzes project dependencies and collects metrics."
+            description = "Analyzes all project dependencies and collects metrics."
             gitHubToken.set(extension.gitHubToken)
             librariesIoToken.set(extension.librariesIoToken)
             maxParallel.set(extension.maxParallelDownloads)
@@ -38,10 +38,16 @@ class LibInsightPlugin : Plugin<Project> {
             cacheTtlDays.set(extension.cacheTtlDays.convention(1))
             suppressionFile.set(extension.suppressionFile)
             
-            // Track build files for reliable incremental builds
-            inputs.file(project.buildFile).withPropertyName("buildScript").optional()
+            // Track build files for reliable incremental builds ONLY if they exist
+            val buildFile = project.buildFile
+            if (buildFile.exists()) {
+                inputs.file(buildFile).withPropertyName("buildScript").optional()
+            }
             if (project.rootProject != project) {
-                inputs.file(project.rootProject.buildFile).withPropertyName("rootBuildScript").optional()
+                val rootBuildFile = project.rootProject.buildFile
+                if (rootBuildFile.exists()) {
+                    inputs.file(rootBuildFile).withPropertyName("rootBuildScript").optional()
+                }
             }
 
             dependencyData.set(project.provider {
