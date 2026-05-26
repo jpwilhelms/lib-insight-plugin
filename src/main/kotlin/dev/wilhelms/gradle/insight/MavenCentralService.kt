@@ -8,6 +8,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.Duration
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 
 class MavenCentralService(private val ctx: ServiceContext) {
@@ -15,7 +17,10 @@ class MavenCentralService(private val ctx: ServiceContext) {
     private val formatter = DateTimeFormatter.ISO_INSTANT.withZone(ZoneOffset.UTC)
 
     fun fetchRawAsync(group: String, name: String): CompletableFuture<String?> {
-        val url = "https://search.maven.org/solrsearch/select?q=g:\"$group\"+AND+a:\"$name\"&core=gav&rows=100&wt=json"
+        val query = "g:\"$group\" AND a:\"$name\""
+        val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8)
+        val url = "https://search.maven.org/solrsearch/select?q=$encodedQuery&core=gav&rows=100&wt=json"
+        
         val request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(Duration.ofSeconds(30))
