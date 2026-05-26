@@ -35,7 +35,6 @@ gradlePlugin {
     website.set("https://github.com/jpwilhelms/lib-insight-plugin")
     vcsUrl.set("https://github.com/jpwilhelms/lib-insight-plugin.git")
     
-    // Portal publication settings
     plugins {
         create("libInsightPlugin") {
             id = "dev.wilhelms.gradle.lib-insight"
@@ -94,9 +93,13 @@ nmcp {
 signing {
     val key = System.getenv("GPG_PRIVATE_KEY")
     val password = System.getenv("GPG_PASSPHRASE")
+    
+    // Only require signing if a key is provided (CI)
+    setRequired({ !key.isNullOrBlank() })
+
     if (!key.isNullOrBlank()) {
         useInMemoryPgpKeys(key, password ?: "")
-        sign(publishing.publications["maven"])
+        sign(publishing.publications)
     }
 }
 
