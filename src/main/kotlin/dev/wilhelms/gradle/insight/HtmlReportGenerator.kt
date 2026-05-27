@@ -212,7 +212,7 @@ class HtmlReportGenerator(private val pluginVersion: String) {
 
     private fun renderSourceLinks(metric: LibMetric): String {
         val links = buildList {
-            add(sourceLink("Maven Central", "Maven Central POM", metric.pom.url, "source-badge source-central", centralIconSvg()))
+            add(sourceLink("POM", "Maven POM", metric.pom.url, "source-badge source-central", pomIconSvg()))
             metric.pom.scmUrl?.let { scmUrl ->
                 normalizeGithubUrl(scmUrl)?.let { add(sourceLink("GitHub", "GitHub", it, "source-badge source-github", githubIconSvg())) }
             }
@@ -258,11 +258,12 @@ class HtmlReportGenerator(private val pluginVersion: String) {
         return url.removeSuffix(".git")
     }
 
-    private fun centralIconSvg(): String = """
+    private fun pomIconSvg(): String = """
         <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3z" />
-            <path d="M4.5 7 12 11l7.5-4" />
-            <path d="M12 11v10" />
+            <path d="M7 3h7l4 4v14H7z" />
+            <path d="M14 3v5h5" />
+            <path d="M9 12h6" />
+            <path d="M9 16h6" />
         </svg>
     """.trimIndent()
 

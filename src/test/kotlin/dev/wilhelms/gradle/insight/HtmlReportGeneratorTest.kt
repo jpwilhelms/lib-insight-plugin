@@ -50,7 +50,7 @@ class HtmlReportGeneratorTest {
         assertTrue(html.contains("""href="https://libraries.io/maven/com.example%3A%3Cscript%3Ealert%281%29%3C%2Fscript%3E""""))
         assertTrue(html.contains("source-badge"))
         assertTrue(html.contains("<svg"))
-        assertTrue(html.contains("Maven Central"))
+        assertTrue(html.contains("POM"))
         assertTrue(html.contains("GitHub"))
         assertTrue(html.contains("deps.dev"))
         assertTrue(html.contains("Libraries.io"))
