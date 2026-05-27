@@ -1,6 +1,8 @@
 # Gradle
 .gradle/
 build/
+*.init.gradle
+gradle-8.5/
 
 # Kotlin
 .kotlin/
@@ -14,3 +16,4 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+test_output.txt
