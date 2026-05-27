@@ -3,6 +3,8 @@ package dev.wilhelms.gradle.insight
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import java.util.ArrayDeque
 
 class LibInsightPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -118,27 +120,39 @@ class LibInsightPlugin : Plugin<Project> {
 
 private fun collectDependencyData(project: Project): Map<String, Boolean> {
     val dataMap = mutableMapOf<String, Boolean>()
-    val scopeProjects = project.rootProject.allprojects
+    val visitedProjects = mutableSetOf<String>()
+    val projectQueue = ArrayDeque<Project>()
+    projectQueue.add(project)
 
-    for (scopeProject in scopeProjects) {
-        for (configName in listOf("runtimeClasspath", "compileClasspath")) {
-            val config = scopeProject.configurations.findByName(configName) ?: continue
-            if (!config.isCanBeResolved) continue
+    while (projectQueue.isNotEmpty()) {
+        val scopeProject = projectQueue.removeFirst()
+        if (!visitedProjects.add(scopeProject.path)) {
+            continue
+        }
 
-            try {
-                val result = config.incoming.resolutionResult
-                val rootId = result.root.id
-                result.allComponents.forEach { component ->
-                    val id = component.id
-                    if (id is ModuleComponentIdentifier) {
+        val config = scopeProject.configurations.findByName("runtimeClasspath") ?: continue
+        if (!config.isCanBeResolved) continue
+
+        try {
+            val result = config.incoming.resolutionResult
+            val rootId = result.root.id
+            result.allComponents.forEach { component ->
+                val id = component.id
+                when (id) {
+                    is ModuleComponentIdentifier -> {
                         val gav = "${id.group}:${id.module}:${id.version}"
                         val isDirect = component.dependents.any { it.from.id == rootId }
                         dataMap[gav] = dataMap.getOrDefault(gav, false) || isDirect
                     }
+                    is ProjectComponentIdentifier -> {
+                        if (id.projectPath != scopeProject.path) {
+                            project.findProject(id.projectPath)?.let { projectQueue.add(it) }
+                        }
+                    }
                 }
-            } catch (_: Exception) {
-                // Ignore unresolved configurations from optional or partial subprojects.
             }
+        } catch (_: Exception) {
+            // Ignore unresolved configurations from optional or partial subprojects.
         }
     }
 

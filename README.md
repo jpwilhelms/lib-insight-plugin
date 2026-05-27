@@ -209,7 +209,7 @@ libInsight {
 }
 ```
 
-In multi-project aggregate builds, `it.isDirect` is true for any dependency resolved from any project classpath in the build, not only for root-project declarations.
+In multi-project aggregate builds, the plugin walks the root project's `runtimeClasspath` and the `runtimeClasspath` of all dependent projects it reaches, not unrelated projects in the build. `it.isDirect` is true if the dependency is direct in any of those resolved classpaths, not only for root-project declarations.
 
 For convenience, date-heavy fields already expose parsed helpers, for example `it.github?.repo?.isInactiveFor(365)` and `it.mavenCentral?.isOlderThanLatest(730)`, so custom audits can stay readable without manual date parsing.
 
