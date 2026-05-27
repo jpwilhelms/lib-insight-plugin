@@ -142,7 +142,7 @@ class LibInsightPluginTest {
     }
 
     @Test
-    fun `direct dependencies from subprojects are treated as direct`() {
+    fun `runtime dependencies from subprojects are discovered but not direct`() {
         val s = "$"
         setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0")
         writeAnalysisCache()
@@ -167,6 +167,11 @@ class LibInsightPluginTest {
             libInsight {
                 cacheDir = file("test-cache")
                 customAudits {
+                    create("runtimeFromSubproject") {
+                        level = "WARN"
+                        filter { !it.isDirect && it.id == "com.github.tester:dummy-lib" }
+                        format { "Runtime dependency found: ${s}{it.id}" }
+                    }
                     create("directInSubproject") {
                         level = "ERROR"
                         filter { it.isDirect && it.id == "com.github.tester:dummy-lib" }
@@ -190,14 +195,15 @@ class LibInsightPluginTest {
             .withArguments("libInsightCheck", "--info", "--stacktrace")
             .withPluginClasspath()
             .forwardOutput()
-            .buildAndFail()
+            .build()
 
-        assertTrue(result.output.contains("[directInSubproject]"), "Should treat subproject dependency as direct")
-        assertTrue(result.output.contains("Direct dependency found: com.github.tester:dummy-lib"), "Should show the direct finding message")
+        assertTrue(result.output.contains("[runtimeFromSubproject]"), "Should analyze the subproject runtime dependency")
+        assertTrue(result.output.contains("Runtime dependency found: com.github.tester:dummy-lib"), "Should show the runtime finding message")
+        assertTrue(!result.output.contains("[directInSubproject]"), "Subproject dependency must not be treated as direct")
     }
 
     @Test
-    fun `transitive dependencies from subprojects are not treated as direct`() {
+    fun `transitive runtime dependencies from subprojects are discovered but not direct`() {
         val s = "$"
         setupLocalMavenArtifact("com.github.tester", "transitive-lib", "1.0.0")
         setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0", "com.github.tester:transitive-lib:1.0.0")
@@ -209,6 +215,7 @@ class LibInsightPluginTest {
         """.trimIndent())
         buildFileGroovy.writeText("""
             plugins {
+                id "java-library"
                 id "dev.wilhelms.gradle.lib-insight"
             }
             allprojects {
@@ -217,13 +224,16 @@ class LibInsightPluginTest {
                     mavenCentral()
                 }
             }
+            dependencies {
+                implementation project(":lib")
+            }
             libInsight {
                 cacheDir = file("test-cache")
                 customAudits {
                     create("transitiveOnly") {
-                        level = "ERROR"
-                        filter { it.isDirect && it.id == "com.github.tester:transitive-lib" }
-                        format { "Should not happen: ${s}{it.id}" }
+                        level = "WARN"
+                        filter { !it.isDirect && it.id == "com.github.tester:transitive-lib" }
+                        format { "Transitive runtime dependency found: ${s}{it.id}" }
                     }
                 }
             }
@@ -245,7 +255,8 @@ class LibInsightPluginTest {
             .forwardOutput()
             .build()
 
-        assertTrue(!result.output.contains("[transitiveOnly]"), "Transitive dependency must not be marked direct")
+        assertTrue(result.output.contains("[transitiveOnly]"), "Transitive runtime dependency must be analyzed")
+        assertTrue(result.output.contains("Transitive runtime dependency found: com.github.tester:transitive-lib"), "Should show the transitive runtime message")
     }
 
     @Test
@@ -259,6 +270,7 @@ class LibInsightPluginTest {
         """.trimIndent())
         buildFileGroovy.writeText("""
             plugins {
+                id "java-library"
                 id "dev.wilhelms.gradle.lib-insight"
             }
             allprojects {
@@ -266,6 +278,9 @@ class LibInsightPluginTest {
                     maven { url = uri(rootProject.file("local-m2")) }
                     mavenCentral()
                 }
+            }
+            dependencies {
+                implementation project(":lib")
             }
             libInsight {
                 cacheDir = file("test-cache")
@@ -333,7 +348,7 @@ class LibInsightPluginTest {
                     }
                     create("wantedLib") {
                         level = "WARN"
-                        filter { it.isDirect && it.id == "com.github.tester:wanted-lib" }
+                        filter { it.id == "com.github.tester:wanted-lib" }
                         format { "Expected dependency found: ${s}{it.id}" }
                     }
                 }
