@@ -93,7 +93,7 @@ The parsed properties `created`, `updated`, and `pushed` are available as `Insta
 | `totalIssues` | `Int` | Total number of issues (open + closed) |
 | `openIssues` | `Int` | Currently open issues |
 | `closedIssues` | `Int` | Currently closed issues |
-| `healthRatio` | `Double` | Ratio of closed issues to total issues (0.0 to 1.0) |
+| `healthRatio` | `Double?` | Ratio of closed issues to total issues (0.0 to 1.0), or null if open/closed search data is incomplete |
 
 ---
 

@@ -32,9 +32,16 @@ class GitHubService(private val ctx: ServiceContext) {
         if (!element.isJsonObject) return null
         val json = element.asJsonObject
 
-        val openIssues = raw.openIssuesJson?.let(::issueCountFromSearch) ?: 0
-        val closedIssues = raw.closedIssuesJson?.let(::issueCountFromSearch) ?: 0
+        val openIssuesParsed = raw.openIssuesJson?.let(::issueCountFromSearch)
+        val closedIssuesParsed = raw.closedIssuesJson?.let(::issueCountFromSearch)
+        val openIssues = openIssuesParsed ?: 0
+        val closedIssues = closedIssuesParsed ?: 0
         val totalIssues = openIssues + closedIssues
+        val healthRatio = if (openIssuesParsed != null && closedIssuesParsed != null) {
+            if (totalIssues > 0) closedIssues.toDouble() / totalIssues else 1.0
+        } else {
+            null
+        }
 
         var ahead: Int? = null
         var behind: Int? = null
@@ -74,7 +81,7 @@ class GitHubService(private val ctx: ServiceContext) {
             totalIssues = totalIssues,
             openIssues = openIssues,
             closedIssues = closedIssues,
-            healthRatio = if (totalIssues > 0) closedIssues.toDouble() / totalIssues else 1.0
+            healthRatio = healthRatio
         )
 
         return GitHubData(repo, issues)
@@ -142,10 +149,10 @@ class GitHubService(private val ctx: ServiceContext) {
         return null
     }
 
-    private fun issueCountFromSearch(jsonStr: String): Int {
+    private fun issueCountFromSearch(jsonStr: String): Int? {
         val element = JsonParser.parseString(jsonStr)
-        if (!element.isJsonObject) return 0
-        return element.asJsonObject.get("total_count").safeInt() ?: 0
+        if (!element.isJsonObject) return null
+        return element.asJsonObject.get("total_count").safeInt()
     }
 
     internal fun issueSearchUrl(owner: String, repo: String, state: String): String {

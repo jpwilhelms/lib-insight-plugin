@@ -183,7 +183,7 @@ data class GitHubIssuesStats(
     val totalIssues: Int,
     val openIssues: Int,
     val closedIssues: Int,
-    val healthRatio: Double
+    val healthRatio: Double?
 ) : Serializable
 
 data class DepsDevData(

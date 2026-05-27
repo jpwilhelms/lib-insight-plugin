@@ -172,7 +172,7 @@ libInsight {
             console = false // Only visible in HTML report
             filter { 
                 def issues = it.github?.issues
-                return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
+                return issues?.healthRatio != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
             }
             format {
                 def issues = it.github?.issues
