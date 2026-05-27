@@ -35,6 +35,8 @@ abstract class LibInsightExtension {
 
     abstract val maxParallelDownloads: Property<Int>
     abstract val asyncTimeoutMinutes: Property<Int>
+    abstract val httpConnectTimeoutSeconds: Property<Int>
+    abstract val httpRequestTimeoutSeconds: Property<Int>
 
     abstract val customAudits: NamedDomainObjectContainer<CustomAuditConfiguration>
     
@@ -61,7 +63,7 @@ abstract class CustomAuditConfiguration(val name: String) {
 }
 
 fun interface SerializablePredicate<T> : Serializable {
-    fun check(t: T): Boolean
+    fun check(t: T): Boolean?
 }
 
 fun interface SerializableFunction<T, R> : Serializable {

@@ -15,6 +15,8 @@ class LibInsightPlugin : Plugin<Project> {
         extension.jsonReport.convention(true)
         extension.maxParallelDownloads.convention(10)
         extension.asyncTimeoutMinutes.convention(30)
+        extension.httpConnectTimeoutSeconds.convention(10)
+        extension.httpRequestTimeoutSeconds.convention(30)
 
         // Set cacheDir convention from environment variable or default to user home
         val envCacheDirVar = project.providers.environmentVariable("LIB_INSIGHT_CACHE_DIR")
@@ -31,6 +33,8 @@ class LibInsightPlugin : Plugin<Project> {
             librariesIoToken.set(extension.librariesIoToken)
             maxParallel.set(extension.maxParallelDownloads)
             timeoutMinutes.set(extension.asyncTimeoutMinutes)
+            connectTimeoutSeconds.set(extension.httpConnectTimeoutSeconds)
+            requestTimeoutSeconds.set(extension.httpRequestTimeoutSeconds)
             dataDir.set(project.layout.buildDirectory.dir("lib-insight/data"))
             cacheDir.set(extension.cacheDir)
             cacheTtlDays.set(extension.cacheTtlDays.convention(1))

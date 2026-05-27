@@ -21,13 +21,13 @@ class LibrariesIoService(private val ctx: ServiceContext) {
         } else baseUrl
 
         val apiRequest = HttpRequest.newBuilder().uri(URI.create(finalApiUrl))
-            .timeout(Duration.ofSeconds(30))
+            .timeout(ctx.requestTimeout)
             .header("Accept", "application/json")
             .header("User-Agent", ctx.userAgent)
             .build()
 
         val webRequest = HttpRequest.newBuilder().uri(URI.create(webUrl))
-            .timeout(Duration.ofSeconds(30))
+            .timeout(ctx.requestTimeout)
             .header("Accept", "text/html")
             .header("User-Agent", ctx.userAgent)
             .build()

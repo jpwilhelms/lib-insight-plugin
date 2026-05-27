@@ -11,6 +11,9 @@ import org.gradle.api.provider.Property
 import org.gradle.api.provider.MapProperty
 import org.gradle.api.tasks.*
 import java.io.File
+import java.net.URI
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -35,6 +38,12 @@ abstract class LibInsightTask : DefaultTask() {
 
     @get:Input
     abstract val timeoutMinutes: Property<Int>
+
+    @get:Input
+    abstract val connectTimeoutSeconds: Property<Int>
+
+    @get:Input
+    abstract val requestTimeoutSeconds: Property<Int>
 
     @get:Internal
     abstract val cacheDir: DirectoryProperty
@@ -72,7 +81,12 @@ abstract class LibInsightTask : DefaultTask() {
         val progress = ProgressLogger(project, javaClass)
         progress.start("Analyzing dependencies", "lib-insight")
 
-        val ctx = ServiceContext(gitHubToken.getOrNull(), librariesIoToken.getOrNull())
+        val ctx = ServiceContext(
+            gitHubToken.getOrNull(),
+            librariesIoToken.getOrNull(),
+            connectTimeoutSeconds.get().toLong(),
+            requestTimeoutSeconds.get().toLong()
+        )
         val githubService = GitHubService(ctx)
         val depsDevService = DepsDevService(ctx)
         val mavenCentralService = MavenCentralService(ctx)
@@ -94,7 +108,7 @@ abstract class LibInsightTask : DefaultTask() {
                 val id = GAV(parts[0], parts[1], parts[2], gav)
 
                 CompletableFuture.supplyAsync({
-                    analyzeWithCacheAsync(envCacheDir, id, pomCache, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions).get()
+                    analyzeWithCacheAsync(envCacheDir, id, pomCache, ctx, githubService, depsDevService, mavenCentralService, libsIoService, isDirectDep, activeSuppressions).get()
                 }, executor).thenApply { metric ->
                     val current = completedCount.incrementAndGet()
                     progress.progress("[$current/${dependencies.size}] $gav")
@@ -173,16 +187,12 @@ abstract class LibInsightTask : DefaultTask() {
     }
 
     private fun analyzeWithCacheAsync(
-        baseDir: File, id: GAV, pomCache: MutableMap<String, File>,
+        baseDir: File, id: GAV, pomCache: MutableMap<String, File>, ctx: ServiceContext,
         ghS: GitHubService, ddS: DepsDevService, mcS: MavenCentralService, liS: LibrariesIoService,
         isDirect: Boolean, activeSuppressions: List<Suppression>
     ): CompletableFuture<LibMetric?> {
         val dir = File(baseDir, "v$CACHE_VERSION/${id.group}/${id.module}/${id.version}")
         dir.mkdirs()
-
-        val pomFile = findInheritedPom(id, pomCache)
-        val scmUrl = extractScmUrl(pomFile, id)
-        val license = pomFile?.let { extractLicense(it) }
 
         // Provider Futures
         val mcFile = File(dir, "maven.json")
@@ -193,30 +203,6 @@ abstract class LibInsightTask : DefaultTask() {
         val ghOpenIssuesFile = File(dir, "github_issues_open.json")
         val ghClosedIssuesFile = File(dir, "github_issues_closed.json")
         val ghCompareFile = File(dir, "github_compare.json")
-        val ghFuture = if (isFresh(ghRepoFile) &&
-            ghOpenIssuesFile.exists() &&
-            ghClosedIssuesFile.exists() &&
-            isFresh(ghOpenIssuesFile) &&
-            isFresh(ghClosedIssuesFile) &&
-            (!ghCompareFile.exists() || isFresh(ghCompareFile))
-        ) {
-            CompletableFuture.completedFuture(GitHubRaw(
-                ghRepoFile.readText(),
-                if (ghOpenIssuesFile.exists()) ghOpenIssuesFile.readText() else null,
-                if (ghClosedIssuesFile.exists()) ghClosedIssuesFile.readText() else null,
-                if (ghCompareFile.exists()) ghCompareFile.readText() else null
-            ))
-        } else if (scmUrl != null) {
-            ghS.fetchRawAsync(scmUrl).thenApply { res ->
-                res?.also {
-                    ghRepoFile.writeText(it.repoJson)
-                    it.openIssuesJson?.let { issues -> ghOpenIssuesFile.writeText(issues) }
-                    it.closedIssuesJson?.let { issues -> ghClosedIssuesFile.writeText(issues) }
-                    it.compareJson?.let { comp -> ghCompareFile.writeText(comp) }
-                }
-            }
-        } else CompletableFuture.completedFuture(null)
-
         val ddPkgFile = File(dir, "depsdev_pkg.json")
         val ddVerFile = File(dir, "depsdev_ver.json")
         val ddProjFile = File(dir, "depsdev_proj.json")
@@ -247,11 +233,45 @@ abstract class LibInsightTask : DefaultTask() {
             }
         }
 
-        return CompletableFuture.allOf(mcFuture, ghFuture, ddFuture, liFuture).thenApply {
+        val pomFuture = findInheritedPomAsync(ctx, id, pomCache)
+        val scmUrlFuture = pomFuture.thenApply { pomFile -> extractScmUrl(pomFile, id) }
+        val licenseFuture = pomFuture.thenApply { pomFile -> pomFile?.let { extractLicense(it) } }
+
+        val ghFuture = scmUrlFuture.thenCompose { scmUrl ->
+            if (isFresh(ghRepoFile) &&
+                ghOpenIssuesFile.exists() &&
+                ghClosedIssuesFile.exists() &&
+                isFresh(ghOpenIssuesFile) &&
+                isFresh(ghClosedIssuesFile) &&
+                (!ghCompareFile.exists() || isFresh(ghCompareFile))
+            ) {
+                CompletableFuture.completedFuture(GitHubRaw(
+                    ghRepoFile.readText(),
+                    if (ghOpenIssuesFile.exists()) ghOpenIssuesFile.readText() else null,
+                    if (ghClosedIssuesFile.exists()) ghClosedIssuesFile.readText() else null,
+                    if (ghCompareFile.exists()) ghCompareFile.readText() else null
+                ))
+            } else if (scmUrl != null) {
+                ghS.fetchRawAsync(scmUrl).thenApply { res ->
+                    res?.also {
+                        ghRepoFile.writeText(it.repoJson)
+                        it.openIssuesJson?.let { issues -> ghOpenIssuesFile.writeText(issues) }
+                        it.closedIssuesJson?.let { issues -> ghClosedIssuesFile.writeText(issues) }
+                        it.compareJson?.let { comp -> ghCompareFile.writeText(comp) }
+                    }
+                }
+            } else {
+                CompletableFuture.completedFuture(null)
+            }
+        }
+
+        return CompletableFuture.allOf(mcFuture, ghFuture, ddFuture, liFuture, pomFuture, licenseFuture).thenApply {
             val mcData = mcFuture.get()?.let { mcS.parse(it, id.version) }
             val ghData = ghFuture.get()?.let { ghS.parse(it) }
             val ddData = ddFuture.get()?.let { ddS.parse(it) }
             val liData = liFuture.get()?.let { liS.parse(it) }
+            val license = licenseFuture.get()
+            val scmUrl = scmUrlFuture.get()
 
             val groupPath = id.group.replace('.', '/')
             val pomUrl = "https://repo1.maven.org/maven2/${groupPath}/${id.module}/${id.version}/${id.module}-${id.version}.pom"
@@ -272,25 +292,37 @@ abstract class LibInsightTask : DefaultTask() {
         }
     }
 
-    private fun findInheritedPom(id: GAV, cache: MutableMap<String, File>): File? {
+    private fun findInheritedPomAsync(ctx: ServiceContext, id: GAV, cache: MutableMap<String, File>): CompletableFuture<File?> {
         val key = id.displayName
-        if (cache.containsKey(key)) return cache[key]
+        if (cache.containsKey(key)) return CompletableFuture.completedFuture(cache[key])
         val groupPath = id.group.replace('.', '/')
         val url = "https://repo1.maven.org/maven2/${groupPath}/${id.module}/${id.version}/${id.module}-${id.version}.pom"
-        val dir = File(cacheDir.get().asFile, "poms/${id.group}/${id.module}")
+        val dir = File(cacheDir.get().asFile, "v$CACHE_VERSION/poms/${id.group}/${id.module}")
         dir.mkdirs()
         val file = File(dir, "${id.version}.pom")
-        if (!file.exists()) {
-            try {
-                val client = java.net.http.HttpClient.newHttpClient()
-                val request = java.net.http.HttpRequest.newBuilder().uri(java.net.URI.create(url)).build()
-                val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofByteArray())
-                if (response.statusCode() == 200) file.writeBytes(response.body())
-                else return null
-            } catch (e: Exception) { return null }
+        if (file.exists()) {
+            cache[key] = file
+            return CompletableFuture.completedFuture(file)
         }
-        cache[key] = file
-        return file
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(ctx.requestTimeout)
+            .header("Accept", "text/xml")
+            .header("User-Agent", ctx.userAgent)
+            .build()
+
+        return ctx.client.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+            .thenApply { response ->
+                if (response.statusCode() == 200) {
+                    file.writeBytes(response.body())
+                    cache[key] = file
+                    file
+                } else {
+                    null
+                }
+            }
+            .exceptionally { null }
     }
 
     private fun extractScmUrl(pomFile: File?, id: GAV): String? {

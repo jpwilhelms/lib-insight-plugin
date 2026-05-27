@@ -14,7 +14,7 @@ class DepsDevService(private val ctx: ServiceContext) {
     private fun fetchUrlAsync(url: String): CompletableFuture<String?> {
         val request = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(Duration.ofSeconds(30))
+            .timeout(ctx.requestTimeout)
             .header("Accept", "application/json")
             .header("User-Agent", ctx.userAgent)
             .build()

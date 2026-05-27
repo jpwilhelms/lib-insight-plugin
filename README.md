@@ -33,76 +33,90 @@ The plugin comes with no hardcoded audits enabled by default. Use the following 
 libInsight {
     // Optional: Path to suppressions file
     suppressionFile = file("lib-insight-suppressions.json")
+    // Optional tuning for large dependency graphs or slow APIs
+    maxParallelDownloads = 20
+    asyncTimeoutMinutes = 45
+    httpConnectTimeoutSeconds = 10
+    httpRequestTimeoutSeconds = 45
 
     customAudits {
-        // 1. Stale Fork Detection
+        // Stale Fork Detection
         create("forks") {
             description = "Flags forks that lag behind their upstream"
             level = "WARN"
-            filter { it.github?.repo?.isFork && (it.github?.repo?.behindBy ?: 0) > 0 }
-            format { "Fork is behind upstream by ${it.github.repo.behindBy} commits${it.github.repo.parentRepo != null ? \" (${it.github.repo.parentRepo})\" : \"\"}" }
+            filter {
+                def repo = it.github?.repo
+                (repo?.isFork ?: false) && ((repo?.behindBy ?: 0) > 0)
+            }
+            format {
+                def repo = it.github?.repo
+                "Fork is behind upstream by ${repo?.behindBy ?: 0} commits${repo?.parentRepo != null ? \" (${repo.parentRepo})\" : \"\"}"
+            }
         }
         
-        // 2. Outdated Version Check
+        // Outdated Version Check
         create("outdated") {
             description = "Checks if the used version is significantly older than the latest"
             level = "WARN"
-            filter { it.mavenCentral?.isOlderThanLatest(730) }
-            format { "Update recommended: Latest is ${it.mavenCentral.latestVersion}" }
+            filter { it.mavenCentral?.isOlderThanLatest(730) ?: false }
+            format { "Update recommended: Latest is ${it.mavenCentral?.latestVersion ?: 'unknown'}" }
         }
 
-        // 3. Security Quality Gate
+        // Security Quality Gate
         create("securityGate") {
             level = "ERROR"
-            filter { (it.depsDev?.advisoriesCount ?: 0) > 0 }
-            format { "CRITICAL: ${it.depsDev.advisoriesCount} known security advisories!" }
+            filter { ((it.depsDev?.advisoriesCount ?: 0) > 0) }
+            format { "CRITICAL: ${(it.depsDev?.advisoriesCount ?: 0)} known security advisories!" }
         }
 
-        // 4. License Review
+        // License Review
         create("licenseUnknown") {
             description = "Flags direct, low-adoption dependencies whose license could not be asserted"
             level = "WARN"
             filter {
-                def license = it.github?.repo?.license
-                it.isDirect &&
+                def repo = it.github?.repo
+                def license = repo?.license
+                (it.isDirect ?: false) &&
                 (license == null || license == "NOASSERTION") &&
                 it.librariesIo != null &&
                 it.librariesIo.dependentReposCount < 5 &&
                 it.librariesIo.dependentsCount < 25
             }
             format {
-                def license = it.github?.repo?.license
+                def repo = it.github?.repo
+                def license = repo?.license
                 def repos = it.librariesIo?.dependentReposCount ?: 0
                 def dependents = it.librariesIo?.dependentsCount ?: 0
                 "License review needed: ${license ?: 'unknown'}; adoption ${repos} repos / ${dependents} dependents"
             }
         }
 
-        // 5. Scorecard Maintenance Check
+        // Scorecard Maintenance Check
         create("maintainedLow") {
             description = "Highlights dependencies with poor OpenSSF Maintained scores"
             level = "WARN"
-            filter { (it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2 }
+            filter { ((it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2) }
             format {
                 def maintained = it.depsDev?.scorecard?.checks?.get("Maintained") ?: 0
                 "Maintained score is ${maintained}"
             }
         }
 
-        // 6. Inactive Repository Warning
+        // Inactive Repository Warning
         create("staleRepo") {
             description = "Flags repositories without a push for more than three years"
             level = "WARN"
             filter {
-                it.github?.repo?.isInactiveFor(1095) ?: false
+                def repo = it.github?.repo
+                repo?.isInactiveFor(1095) ?: false
             }
             format {
                 def repo = it.github?.repo
-                "Repository inactive since ${repo.pushedAt}" + (repo.stargazersCount != null ? " (${repo.stargazersCount} stars)" : "")
+                "Repository inactive since ${repo?.pushedAt ?: 'unknown'}" + (repo?.stargazersCount != null ? " (${repo.stargazersCount} stars)" : "")
             }
         }
 
-        // 7. Stale Unlicensed Repository
+        // Stale Unlicensed Repository
         create("staleUnlicensed") {
             description = "Flags stale repositories whose license cannot be asserted"
             level = "WARN"
@@ -115,50 +129,44 @@ libInsight {
             format {
                 def repo = it.github?.repo
                 def license = repo?.license
-                "Stale repo with unknown license: ${license ?: 'unknown'}; last push ${repo.pushedAt}"
+                "Stale repo with unknown license: ${license ?: 'unknown'}; last push ${repo?.pushedAt ?: 'unknown'}"
             }
         }
 
-        // 8. Outdated Release Check
-        create("outdated") {
-            description = "Highlights releases that lag behind the latest version"
-            level = "WARN"
-            filter { it.mavenCentral?.isOlderThanLatest(730) ?: false }
-            format { "Update recommended: latest is ${it.mavenCentral.latestVersion}" }
-        }
-
-        // 9. Direct License Review
+        // Direct License Review
         create("licenseUnknownDirect") {
             description = "Direct, low-adoption dependencies whose license could not be asserted"
             level = "WARN"
             filter {
-                def license = it.github?.repo?.license
-                it.isDirect &&
+                def repo = it.github?.repo
+                def license = repo?.license
+                (it.isDirect ?: false) &&
                 (license == null || license == "NOASSERTION") &&
                 it.librariesIo != null &&
                 it.librariesIo.dependentReposCount < 5 &&
                 it.librariesIo.dependentsCount < 25
             }
             format {
-                def license = it.github?.repo?.license
+                def repo = it.github?.repo
+                def license = repo?.license
                 def repos = it.librariesIo?.dependentReposCount ?: 0
                 def dependents = it.librariesIo?.dependentsCount ?: 0
                 "License review needed: ${license ?: 'unknown'}; adoption ${repos} repos / ${dependents} dependents"
             }
         }
 
-        // 10. Direct Maintained Score Check
+        // Direct Maintained Score Check
         create("maintainedLowDirect") {
             description = "Direct dependencies with poor OpenSSF Maintained scores"
             level = "WARN"
-            filter { it.isDirect && ((it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2) }
+            filter { (it.isDirect ?: false) && ((it.depsDev?.scorecard?.checks?.get("Maintained") ?: 10) <= 2) }
             format {
                 def maintained = it.depsDev?.scorecard?.checks?.get("Maintained") ?: 0
                 "Maintained score is ${maintained}"
             }
         }
 
-        // 11. Maintenance Check (Silent in console)
+        // Maintenance Check (Silent in console)
         create("maintenanceCheck") {
             level = "INFO"
             console = false // Only visible in HTML report
@@ -166,19 +174,36 @@ libInsight {
                 def issues = it.github?.issues
                 return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
             }
-            format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
+            format {
+                def issues = it.github?.issues
+                "Poor maintenance: Only ${((issues?.healthRatio ?: 0d) * 100).toInteger()}% of issues are closed"
+            }
         }
 
-        // 12. Niche Library Warning (using Libraries.io)
+        // Niche Library Warning (using Libraries.io)
         create("nicheLibrary") {
-            description = "Flags libraries with very low adoption across repositories and packages"
+            description = "Flags standalone libraries with very low adoption across repositories and packages"
             level = "WARN"
             filter {
-                it.librariesIo != null &&
-                it.librariesIo.dependentReposCount < 5 &&
-                it.librariesIo.dependentsCount < 25
+                def libs = it.librariesIo
+                def artifactId = it.id.substring(it.id.indexOf(':') + 1).toLowerCase()
+                def infrastructureArtifact =
+                    artifactId == 'bom' ||
+                    artifactId.endsWith('-bom') ||
+                    artifactId == 'parent' ||
+                    artifactId.endsWith('-parent') ||
+                    artifactId == 'platform' ||
+                    artifactId.endsWith('-platform')
+                (it.isDirect ?: false) &&
+                libs != null &&
+                !infrastructureArtifact &&
+                libs.dependentReposCount < 3 &&
+                libs.dependentsCount < 10
             }
-            format { "Niche Library: ${it.librariesIo.dependentReposCount} repos / ${it.librariesIo.dependentsCount} total dependents" }
+            format {
+                def libs = it.librariesIo
+                "Niche Library: ${libs?.dependentReposCount ?: 0} repos / ${libs?.dependentsCount ?: 0} total dependents"
+            }
         }
     }
 }
@@ -198,7 +223,10 @@ For convenience, date-heavy fields already expose parsed helpers, for example `i
 | `librariesIoToken` | `LIBRARIES_IO_TOKEN` | - | API key for libraries.io integration. |
 | `cacheDir` | `LIB_INSIGHT_CACHE_DIR` | `~/.gradle/lib-insight-cache` | Shared metadata cache directory. Accepts an absolute path. |
 | `cacheTtlDays` | - | `1` | Cache validity in days. |
+| `maxParallelDownloads` | - | `10` | Maximum number of libraries analyzed in parallel. |
 | `asyncTimeoutMinutes` | - | `30` | Maximum time to wait for all asynchronous API requests. |
+| `httpConnectTimeoutSeconds` | - | `10` | TCP connect timeout for outbound HTTP requests. |
+| `httpRequestTimeoutSeconds` | - | `30` | Timeout for individual HTTP requests. |
 | `htmlReport` | - | `true` | Writes `build/reports/lib-insight/index.html`. |
 | `jsonReport` | - | `true` | Writes `build/reports/lib-insight/report.json`. |
 | `suppressionFile` | - | - | JSON file containing findings to ignore. |

@@ -6,7 +6,7 @@ object LibInsightReportEngine {
             val findings = mutableListOf<Finding>()
 
             audits.forEach { audit ->
-                if (audit.filter.check(metric)) {
+                if (audit.filter.check(metric) == true) {
                     findings.add(
                         Finding(
                             audit.name,

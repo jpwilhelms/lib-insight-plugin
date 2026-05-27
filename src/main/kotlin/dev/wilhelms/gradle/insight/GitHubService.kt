@@ -14,7 +14,7 @@ class GitHubService(private val ctx: ServiceContext) {
     private fun fetchUrlAsync(url: String): CompletableFuture<String?> {
         val requestBuilder = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(Duration.ofSeconds(30))
+            .timeout(ctx.requestTimeout)
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", ctx.userAgent)
         
