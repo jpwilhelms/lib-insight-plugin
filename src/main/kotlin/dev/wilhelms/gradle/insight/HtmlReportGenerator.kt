@@ -103,22 +103,45 @@ class HtmlReportGenerator(private val pluginVersion: String) {
                     .metadata { display: flex; gap: 15px; font-size: 0.8em; color: #7f8c8d; }
                     .metadata { flex-wrap: wrap; align-items: center; justify-content: flex-end; }
                     .tag { padding: 2px 6px; border-radius: 10px; background: #eee; }
-                    .source-links { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-                    .source-link {
+                    .source-links { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+                    .source-badge {
                         display: inline-flex;
                         align-items: center;
-                        justify-content: center;
-                        min-width: 2.2em;
-                        padding: 2px 6px;
+                        gap: 6px;
+                        padding: 4px 10px;
                         border-radius: 999px;
-                        font-size: 0.75em;
+                        font-size: 0.76em;
                         font-weight: 700;
                         text-decoration: none;
                         color: #2c3e50;
-                        background: #e9eef3;
-                        border: 1px solid #d4dbe3;
+                        background: linear-gradient(180deg, #ffffff 0%, #eef3f8 100%);
+                        border: 1px solid #d7dfe7;
+                        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+                        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
                     }
-                    .source-link:hover { background: #dfe7ef; }
+                    .source-badge:hover {
+                        transform: translateY(-1px);
+                        box-shadow: 0 3px 8px rgba(15, 23, 42, 0.09);
+                        border-color: #c7d0da;
+                    }
+                    .source-badge__icon {
+                        width: 16px;
+                        height: 16px;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    .source-badge__icon svg {
+                        width: 16px;
+                        height: 16px;
+                        display: block;
+                        fill: none;
+                        stroke: currentColor;
+                        stroke-width: 1.8;
+                        stroke-linecap: round;
+                        stroke-linejoin: round;
+                    }
+                    .source-badge__text { white-space: nowrap; }
                     .source-central { color: #8e44ad; }
                     .source-github { color: #24292f; }
                     .source-depsdev { color: #0b6efd; }
@@ -189,21 +212,21 @@ class HtmlReportGenerator(private val pluginVersion: String) {
 
     private fun renderSourceLinks(metric: LibMetric): String {
         val links = buildList {
-            add(sourceLink("MC", "Maven Central POM", metric.pom.url, "source-link source-central"))
+            add(sourceLink("Maven Central", "Maven Central POM", metric.pom.url, "source-badge source-central", centralIconSvg()))
             metric.pom.scmUrl?.let { scmUrl ->
-                normalizeGithubUrl(scmUrl)?.let { add(sourceLink("GH", "GitHub", it, "source-link source-github")) }
+                normalizeGithubUrl(scmUrl)?.let { add(sourceLink("GitHub", "GitHub", it, "source-badge source-github", githubIconSvg())) }
             }
-            add(sourceLink("DD", "deps.dev", depsDevUrl(metric), "source-link source-depsdev"))
-            add(sourceLink("LI", "Libraries.io", librariesIoUrl(metric), "source-link source-librariesio"))
+            add(sourceLink("deps.dev", "deps.dev", depsDevUrl(metric), "source-badge source-depsdev", depsDevIconSvg()))
+            add(sourceLink("Libraries.io", "Libraries.io", librariesIoUrl(metric), "source-badge source-librariesio", librariesIoIconSvg()))
         }.filterNotNull()
 
         if (links.isEmpty()) return ""
         return """<span class="source-links">${links.joinToString("")}</span>"""
     }
 
-    private fun sourceLink(label: String, title: String, url: String?, cssClass: String): String? {
+    private fun sourceLink(label: String, title: String, url: String?, cssClass: String, iconSvg: String): String? {
         if (url.isNullOrBlank()) return null
-        return """<a class="${escapeHtml(cssClass)}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(label)}</a>"""
+        return """<a class="${escapeHtml(cssClass)}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"><span class="source-badge__icon">$iconSvg</span><span class="source-badge__text">${escapeHtml(label)}</span></a>"""
     }
 
     private fun depsDevUrl(metric: LibMetric): String {
@@ -234,6 +257,44 @@ class HtmlReportGenerator(private val pluginVersion: String) {
 
         return url.removeSuffix(".git")
     }
+
+    private fun centralIconSvg(): String = """
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3z" />
+            <path d="M4.5 7 12 11l7.5-4" />
+            <path d="M12 11v10" />
+        </svg>
+    """.trimIndent()
+
+    private fun githubIconSvg(): String = """
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 7v10" />
+            <path d="M8 7a2 2 0 1 1 0-4 2 2 0 0 1 0 4z" />
+            <path d="M8 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
+            <path d="M8 9c6 0 7 5 10 8" />
+            <path d="M18 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
+        </svg>
+    """.trimIndent()
+
+    private fun depsDevIconSvg(): String = """
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="6" cy="6" r="2" />
+            <circle cx="18" cy="6" r="2" />
+            <circle cx="12" cy="18" r="2" />
+            <path d="M7.7 7.3 10.5 10" />
+            <path d="M16.3 7.3 13.5 10" />
+            <path d="M12 16V10" />
+        </svg>
+    """.trimIndent()
+
+    private fun librariesIoIconSvg(): String = """
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 19V9" />
+            <path d="M10 19V5" />
+            <path d="M15 19v-8" />
+            <path d="M20 19V11" />
+        </svg>
+    """.trimIndent()
 
     private fun escapeHtml(input: String): String {
         return buildString(input.length) {
