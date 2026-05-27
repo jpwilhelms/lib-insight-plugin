@@ -77,7 +77,7 @@ class GitHubService(private val ctx: ServiceContext) {
             healthRatio = if (totalIssues > 0) closedIssues.toDouble() / totalIssues else 1.0
         )
 
-        return GitHubData(repo, issues, null)
+        return GitHubData(repo, issues)
     }
 
     fun fetchRawAsync(scmUrl: String?): CompletableFuture<GitHubRaw?> {

@@ -144,8 +144,7 @@ data class MavenCentralData(
 
 data class GitHubData(
     val repo: GitHubRepo?,
-    val issues: GitHubIssuesStats?,
-    val activity: GitHubActivity?
+    val issues: GitHubIssuesStats?
 ) : Serializable
 
 data class GitHubRepo(
@@ -181,11 +180,6 @@ data class GitHubIssuesStats(
     val openIssues: Int,
     val closedIssues: Int,
     val healthRatio: Double
-) : Serializable
-
-data class GitHubActivity(
-    val lastCommitDaysAgo: Long?,
-    val commitsLastYear: Int?
 ) : Serializable
 
 data class DepsDevData(

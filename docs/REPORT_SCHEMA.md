@@ -93,10 +93,6 @@ The parsed properties `created`, `updated`, and `pushed` are available as `Insta
 | `closedIssues` | `Int` | Currently closed issues |
 | `healthRatio` | `Double` | Ratio of closed issues to total issues (0.0 to 1.0) |
 
-### GitHub Activity (`github.activity`)
-
-Currently present in the schema as `null`.
-
 ---
 
 ### Deps.dev (`depsDev`)
