@@ -119,51 +119,7 @@ libInsight {
             }
         }
 
-        // 8. Maintenance Check (Silent in console)
-        create("maintenanceCheck") {
-            level = "INFO"
-            console = false // Only visible in HTML report
-            filter { 
-                def issues = it.github?.issues
-                return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
-            }
-            format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
-        }
-
-        // 9. Niche Library Warning (using Libraries.io)
-        create("nicheLibrary") {
-            description = "Flags libraries with very low adoption across repositories and packages"
-            level = "WARN"
-            filter {
-                it.librariesIo != null &&
-                it.librariesIo.dependentReposCount < 5 &&
-                it.librariesIo.dependentsCount < 25
-            }
-            format { "Niche Library: ${it.librariesIo.dependentReposCount} repos / ${it.librariesIo.dependentsCount} total dependents" }
-        }
-    }
-}
-```
-
-In multi-project aggregate builds, `it.isDirect` is true for any dependency resolved from any project classpath in the build, not only for root-project declarations.
-
-For convenience, date-heavy fields already expose parsed helpers, for example `it.github?.repo?.isInactiveFor(365)` and `it.mavenCentral?.isOlderThanLatest(730)`, so custom audits can stay readable without manual date parsing.
-
-If you want a copy-paste starting point for direct governance plus transitive hygiene checks, this single configuration covers both.
-
-```groovy
-libInsight {
-    customAudits {
-        create("staleRepo") {
-            description = "Flags repositories that have not been updated for a long time"
-            level = "WARN"
-            filter { it.github?.repo?.isInactiveFor(365) ?: false }
-            format {
-                def repo = it.github?.repo
-                "No push for more than a year: ${repo?.pushed}${repo?.stargazersCount != null ? \" (${repo.stargazersCount} stars)\" : \"\"}"
-            }
-        }
-
+        // 8. Outdated Release Check
         create("outdated") {
             description = "Highlights releases that lag behind the latest version"
             level = "WARN"
@@ -171,19 +127,7 @@ libInsight {
             format { "Update recommended: latest is ${it.mavenCentral.latestVersion}" }
         }
 
-        create("staleUnlicensed") {
-            description = "Flags stale repositories whose license is unclear"
-            level = "WARN"
-            filter {
-                def repo = it.github?.repo
-                (repo?.isInactiveFor(365) ?: false) && (repo?.license == null || repo.license == "NOASSERTION")
-            }
-            format {
-                def repo = it.github?.repo
-                "Stale repo with unknown license: ${repo?.license ?: 'unknown'}; last push ${repo?.pushed}"
-            }
-        }
-
+        // 9. Direct License Review
         create("licenseUnknownDirect") {
             description = "Direct, low-adoption dependencies whose license could not be asserted"
             level = "WARN"
@@ -203,6 +147,7 @@ libInsight {
             }
         }
 
+        // 10. Direct Maintained Score Check
         create("maintainedLowDirect") {
             description = "Direct dependencies with poor OpenSSF Maintained scores"
             level = "WARN"
@@ -212,9 +157,37 @@ libInsight {
                 "Maintained score is ${maintained}"
             }
         }
+
+        // 11. Maintenance Check (Silent in console)
+        create("maintenanceCheck") {
+            level = "INFO"
+            console = false // Only visible in HTML report
+            filter { 
+                def issues = it.github?.issues
+                return issues != null && issues.totalIssues >= 20 && issues.healthRatio < 0.2
+            }
+            format { "Poor maintenance: Only ${(it.github.issues.healthRatio * 100).toInteger()}% of issues are closed" }
+        }
+
+        // 12. Niche Library Warning (using Libraries.io)
+        create("nicheLibrary") {
+            description = "Flags libraries with very low adoption across repositories and packages"
+            level = "WARN"
+            filter {
+                it.librariesIo != null &&
+                it.librariesIo.dependentReposCount < 5 &&
+                it.librariesIo.dependentsCount < 25
+            }
+            format { "Niche Library: ${it.librariesIo.dependentReposCount} repos / ${it.librariesIo.dependentsCount} total dependents" }
+        }
     }
 }
 ```
+
+In multi-project aggregate builds, `it.isDirect` is true for any dependency resolved from any project classpath in the build, not only for root-project declarations.
+
+For convenience, date-heavy fields already expose parsed helpers, for example `it.github?.repo?.isInactiveFor(365)` and `it.mavenCentral?.isOlderThanLatest(730)`, so custom audits can stay readable without manual date parsing.
+
 </details>
 
 ### Global Configuration & Environment Variables
