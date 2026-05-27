@@ -142,7 +142,7 @@ class LibInsightPluginTest {
     }
 
     @Test
-    fun `direct dependencies from subprojects are treated as direct`() {
+    fun `runtime dependencies from subprojects are discovered and direct`() {
         val s = "$"
         setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0")
         writeAnalysisCache()
@@ -152,6 +152,7 @@ class LibInsightPluginTest {
         """.trimIndent())
         buildFileGroovy.writeText("""
             plugins {
+                id "java-library"
                 id "dev.wilhelms.gradle.lib-insight"
             }
             allprojects {
@@ -160,11 +161,14 @@ class LibInsightPluginTest {
                     mavenCentral()
                 }
             }
+            dependencies {
+                implementation project(":lib")
+            }
             libInsight {
                 cacheDir = file("test-cache")
                 customAudits {
                     create("directInSubproject") {
-                        level = "ERROR"
+                        level = "WARN"
                         filter { it.isDirect && it.id == "com.github.tester:dummy-lib" }
                         format { "Direct dependency found: ${s}{it.id}" }
                     }
@@ -186,14 +190,14 @@ class LibInsightPluginTest {
             .withArguments("libInsightCheck", "--info", "--stacktrace")
             .withPluginClasspath()
             .forwardOutput()
-            .buildAndFail()
+            .build()
 
-        assertTrue(result.output.contains("[directInSubproject]"), "Should treat subproject dependency as direct")
+        assertTrue(result.output.contains("[directInSubproject]"), "Subproject runtime dependency must be treated as direct")
         assertTrue(result.output.contains("Direct dependency found: com.github.tester:dummy-lib"), "Should show the direct finding message")
     }
 
     @Test
-    fun `transitive dependencies from subprojects are not treated as direct`() {
+    fun `transitive runtime dependencies from subprojects are discovered but not direct`() {
         val s = "$"
         setupLocalMavenArtifact("com.github.tester", "transitive-lib", "1.0.0")
         setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0", "com.github.tester:transitive-lib:1.0.0")
@@ -205,6 +209,7 @@ class LibInsightPluginTest {
         """.trimIndent())
         buildFileGroovy.writeText("""
             plugins {
+                id "java-library"
                 id "dev.wilhelms.gradle.lib-insight"
             }
             allprojects {
@@ -213,13 +218,16 @@ class LibInsightPluginTest {
                     mavenCentral()
                 }
             }
+            dependencies {
+                implementation project(":lib")
+            }
             libInsight {
                 cacheDir = file("test-cache")
                 customAudits {
                     create("transitiveOnly") {
-                        level = "ERROR"
-                        filter { it.isDirect && it.id == "com.github.tester:transitive-lib" }
-                        format { "Should not happen: ${s}{it.id}" }
+                        level = "WARN"
+                        filter { !it.isDirect && it.id == "com.github.tester:transitive-lib" }
+                        format { "Transitive runtime dependency found: ${s}{it.id}" }
                     }
                 }
             }
@@ -241,7 +249,133 @@ class LibInsightPluginTest {
             .forwardOutput()
             .build()
 
-        assertTrue(!result.output.contains("[transitiveOnly]"), "Transitive dependency must not be marked direct")
+        assertTrue(result.output.contains("[transitiveOnly]"), "Transitive runtime dependency must be analyzed")
+        assertTrue(result.output.contains("Transitive runtime dependency found: com.github.tester:transitive-lib"), "Should show the transitive runtime message")
+    }
+
+    @Test
+    fun `compile only dependencies are ignored`() {
+        val s = "$"
+        setupLocalMavenArtifact("com.github.tester", "compile-only-lib", "1.0.0")
+        writeAnalysisCache("com.github.tester", "compile-only-lib", "1.0.0")
+        settingsFile.writeText("""
+            rootProject.name = "multi-module-compile-only-test"
+            include("lib")
+        """.trimIndent())
+        buildFileGroovy.writeText("""
+            plugins {
+                id "java-library"
+                id "dev.wilhelms.gradle.lib-insight"
+            }
+            allprojects {
+                repositories {
+                    maven { url = uri(rootProject.file("local-m2")) }
+                    mavenCentral()
+                }
+            }
+            dependencies {
+                implementation project(":lib")
+            }
+            libInsight {
+                cacheDir = file("test-cache")
+                customAudits {
+                    create("compileOnlyLeak") {
+                        level = "ERROR"
+                        filter { it.isDirect && it.id == "com.github.tester:compile-only-lib" }
+                        format { "Unexpected compile-only dependency found: ${s}{it.id}" }
+                    }
+                }
+            }
+        """.trimIndent())
+        testProjectDir.resolve("lib").mkdirs()
+        testProjectDir.resolve("lib/build.gradle").writeText("""
+            plugins {
+                id "java-library"
+            }
+            dependencies {
+                compileOnly "com.github.tester:compile-only-lib:1.0.0"
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create()
+            .withProjectDir(testProjectDir)
+            .withArguments("libInsightCheck", "--info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        assertTrue(!result.output.contains("[compileOnlyLeak]"), "compileOnly dependency must not be analyzed")
+    }
+
+    @Test
+    fun `unrelated projects are ignored`() {
+        val s = "$"
+        setupLocalMavenArtifact("com.github.tester", "wanted-lib", "1.0.0")
+        setupLocalMavenArtifact("com.github.tester", "unrelated-lib", "1.0.0")
+        writeAnalysisCache("com.github.tester", "wanted-lib", "1.0.0")
+        writeAnalysisCache("com.github.tester", "unrelated-lib", "1.0.0")
+        settingsFile.writeText("""
+            rootProject.name = "multi-module-unrelated-test"
+            include("lib", "other")
+        """.trimIndent())
+        buildFileGroovy.writeText("""
+            plugins {
+                id "java-library"
+                id "dev.wilhelms.gradle.lib-insight"
+            }
+            allprojects {
+                repositories {
+                    maven { url = uri(rootProject.file("local-m2")) }
+                    mavenCentral()
+                }
+            }
+            dependencies {
+                implementation project(":lib")
+            }
+            libInsight {
+                cacheDir = file("test-cache")
+                customAudits {
+                    create("unrelatedLeak") {
+                        level = "ERROR"
+                        filter { it.isDirect && it.id == "com.github.tester:unrelated-lib" }
+                        format { "Unexpected unrelated dependency found: ${s}{it.id}" }
+                    }
+                    create("wantedLib") {
+                        level = "WARN"
+                        filter { it.id == "com.github.tester:wanted-lib" }
+                        format { "Expected dependency found: ${s}{it.id}" }
+                    }
+                }
+            }
+        """.trimIndent())
+        testProjectDir.resolve("lib").mkdirs()
+        testProjectDir.resolve("lib/build.gradle").writeText("""
+            plugins {
+                id "java-library"
+            }
+            dependencies {
+                implementation "com.github.tester:wanted-lib:1.0.0"
+            }
+        """.trimIndent())
+        testProjectDir.resolve("other").mkdirs()
+        testProjectDir.resolve("other/build.gradle").writeText("""
+            plugins {
+                id "java-library"
+            }
+            dependencies {
+                implementation "com.github.tester:unrelated-lib:1.0.0"
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create()
+            .withProjectDir(testProjectDir)
+            .withArguments("libInsightCheck", "--info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        assertTrue(result.output.contains("[wantedLib]"), "Dependent project dependency must be analyzed")
+        assertTrue(!result.output.contains("[unrelatedLeak]"), "Unrelated project dependency must not be analyzed")
     }
 
     @Test
