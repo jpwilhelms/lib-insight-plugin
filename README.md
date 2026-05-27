@@ -149,13 +149,7 @@ In multi-project aggregate builds, `it.isDirect` is true for any dependency reso
 
 For convenience, date-heavy fields already expose parsed helpers, for example `it.github?.repo?.isInactiveFor(365)` and `it.mavenCentral?.isOlderThanLatest(730)`, so custom audits can stay readable without manual date parsing.
 
-If you want a copy-paste starting point for direct governance plus transitive hygiene checks, this pattern works well:
-
-### Direct Governance
-Use these when you want to surface direct dependencies that matter for governance decisions in aggregate builds.
-
-### Transitive Hygiene
-Use these when you want visibility into older or weakly maintained transitive libraries without turning them into gates.
+If you want a copy-paste starting point for direct governance plus transitive hygiene checks, this single configuration covers both.
 
 ```groovy
 libInsight {
