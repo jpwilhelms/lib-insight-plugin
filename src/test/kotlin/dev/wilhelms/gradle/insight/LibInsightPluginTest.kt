@@ -142,7 +142,7 @@ class LibInsightPluginTest {
     }
 
     @Test
-    fun `runtime dependencies from subprojects are discovered but not direct`() {
+    fun `runtime dependencies from subprojects are discovered and direct`() {
         val s = "$"
         setupLocalMavenArtifact("com.github.tester", "dummy-lib", "1.0.0")
         writeAnalysisCache()
@@ -167,13 +167,8 @@ class LibInsightPluginTest {
             libInsight {
                 cacheDir = file("test-cache")
                 customAudits {
-                    create("runtimeFromSubproject") {
-                        level = "WARN"
-                        filter { !it.isDirect && it.id == "com.github.tester:dummy-lib" }
-                        format { "Runtime dependency found: ${s}{it.id}" }
-                    }
                     create("directInSubproject") {
-                        level = "ERROR"
+                        level = "WARN"
                         filter { it.isDirect && it.id == "com.github.tester:dummy-lib" }
                         format { "Direct dependency found: ${s}{it.id}" }
                     }
@@ -197,9 +192,8 @@ class LibInsightPluginTest {
             .forwardOutput()
             .build()
 
-        assertTrue(result.output.contains("[runtimeFromSubproject]"), "Should analyze the subproject runtime dependency")
-        assertTrue(result.output.contains("Runtime dependency found: com.github.tester:dummy-lib"), "Should show the runtime finding message")
-        assertTrue(!result.output.contains("[directInSubproject]"), "Subproject dependency must not be treated as direct")
+        assertTrue(result.output.contains("[directInSubproject]"), "Subproject runtime dependency must be treated as direct")
+        assertTrue(result.output.contains("Direct dependency found: com.github.tester:dummy-lib"), "Should show the direct finding message")
     }
 
     @Test
