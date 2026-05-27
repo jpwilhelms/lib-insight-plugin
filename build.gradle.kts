@@ -2,9 +2,7 @@ plugins {
     `kotlin-dsl`
     `java-gradle-plugin`
     `maven-publish`
-    `signing`
     id("org.jetbrains.dokka") version "1.9.10"
-    id("com.gradleup.nmcp") version "0.0.9"
     id("com.gradle.plugin-publish") version "1.2.1"
 }
 
@@ -46,7 +44,6 @@ gradlePlugin {
     }
 }
 
-// Ensure NMCP is configured AFTER all plugins have registered their publications
 afterEvaluate {
     publishing {
         publications.withType<MavenPublication>().configureEach {
@@ -81,25 +78,6 @@ afterEvaluate {
                 }
             }
         }
-    }
-
-    nmcp {
-        publish("pluginMaven") {
-            username.set(System.getenv("OSSRH_USERNAME"))
-            password.set(System.getenv("OSSRH_PASSWORD"))
-        }
-    }
-}
-
-signing {
-    val key = System.getenv("GPG_PRIVATE_KEY")
-    val password = System.getenv("GPG_PASSPHRASE")
-    
-    setRequired({ !key.isNullOrBlank() })
-
-    if (!key.isNullOrBlank()) {
-        useInMemoryPgpKeys(key, password ?: "")
-        sign(publishing.publications)
     }
 }
 
