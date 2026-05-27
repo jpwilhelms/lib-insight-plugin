@@ -92,8 +92,8 @@ class GitHubService(private val ctx: ServiceContext) {
                 CompletableFuture.completedFuture<GitHubRaw?>(null)
             } else {
                 val repoJson = JsonParser.parseString(repoJsonStr).asJsonObject
-                val openIssuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue+state:open")
-                val closedIssuesFuture = fetchUrlAsync("https://api.github.com/search/issues?q=repo:$owner/$repo+type:issue+state:closed")
+                val openIssuesFuture = fetchUrlAsync(issueSearchUrl(owner, repo, "open"))
+                val closedIssuesFuture = fetchUrlAsync(issueSearchUrl(owner, repo, "closed"))
                 
                 var compareFuture: CompletableFuture<String?>? = null
                 if (repoJson.get("fork").safeBoolean() == true) {
@@ -146,6 +146,10 @@ class GitHubService(private val ctx: ServiceContext) {
         val element = JsonParser.parseString(jsonStr)
         if (!element.isJsonObject) return 0
         return element.asJsonObject.get("total_count").safeInt() ?: 0
+    }
+
+    internal fun issueSearchUrl(owner: String, repo: String, state: String): String {
+        return "https://api.github.com/search/issues?q=repo:$owner/$repo+is:issue+is:$state"
     }
 }
 

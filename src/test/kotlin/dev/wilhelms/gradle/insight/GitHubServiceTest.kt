@@ -3,6 +3,7 @@ package dev.wilhelms.gradle.insight
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class GitHubServiceTest {
     @Test
@@ -35,5 +36,13 @@ class GitHubServiceTest {
         assertEquals(6, data.issues?.closedIssues)
         assertEquals(0.6, data.issues?.healthRatio)
         assertEquals(4, data.repo?.openIssuesCount)
+    }
+
+    @Test
+    fun `issue search urls use canonical issue qualifiers`() {
+        val service = GitHubService(ServiceContext())
+
+        assertTrue(service.issueSearchUrl("owner", "repo", "open").contains("repo:owner/repo+is:issue+is:open"))
+        assertTrue(service.issueSearchUrl("owner", "repo", "closed").contains("repo:owner/repo+is:issue+is:closed"))
     }
 }
