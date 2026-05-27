@@ -1,6 +1,8 @@
 package dev.wilhelms.gradle.insight
 
 import java.io.File
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 class HtmlReportGenerator(private val pluginVersion: String) {
 
@@ -99,7 +101,28 @@ class HtmlReportGenerator(private val pluginVersion: String) {
                     .finding-INFO { background: #eef2f7; color: #2c3e50; border-left: 3px solid var(--info-color); }
 
                     .metadata { display: flex; gap: 15px; font-size: 0.8em; color: #7f8c8d; }
+                    .metadata { flex-wrap: wrap; align-items: center; justify-content: flex-end; }
                     .tag { padding: 2px 6px; border-radius: 10px; background: #eee; }
+                    .source-links { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+                    .source-link {
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-width: 2.2em;
+                        padding: 2px 6px;
+                        border-radius: 999px;
+                        font-size: 0.75em;
+                        font-weight: 700;
+                        text-decoration: none;
+                        color: #2c3e50;
+                        background: #e9eef3;
+                        border: 1px solid #d4dbe3;
+                    }
+                    .source-link:hover { background: #dfe7ef; }
+                    .source-central { color: #8e44ad; }
+                    .source-github { color: #24292f; }
+                    .source-depsdev { color: #0b6efd; }
+                    .source-librariesio { color: #0f7b6c; }
                     footer { text-align: center; margin-top: 50px; font-size: 0.8em; color: #95a5a6; }
                 </style>
             </head>
@@ -145,6 +168,7 @@ class HtmlReportGenerator(private val pluginVersion: String) {
                         <div class="metadata">
                             <span>Version: <strong>${escapeHtml(item.metric.version)}</strong></span>
                             ${if (item.metric.isDirect) "<span class='tag'>Direct</span>" else "<span class='tag'>Transitive</span>"}
+                            ${renderSourceLinks(item.metric)}
                         </div>
                     </div>
                     <div class="card-body">
@@ -161,6 +185,54 @@ class HtmlReportGenerator(private val pluginVersion: String) {
                 """
             }}
         """
+    }
+
+    private fun renderSourceLinks(metric: LibMetric): String {
+        val links = buildList {
+            add(sourceLink("MC", "Maven Central POM", metric.pom.url, "source-link source-central"))
+            metric.pom.scmUrl?.let { scmUrl ->
+                normalizeGithubUrl(scmUrl)?.let { add(sourceLink("GH", "GitHub", it, "source-link source-github")) }
+            }
+            add(sourceLink("DD", "deps.dev", depsDevUrl(metric), "source-link source-depsdev"))
+            add(sourceLink("LI", "Libraries.io", librariesIoUrl(metric), "source-link source-librariesio"))
+        }.filterNotNull()
+
+        if (links.isEmpty()) return ""
+        return """<span class="source-links">${links.joinToString("")}</span>"""
+    }
+
+    private fun sourceLink(label: String, title: String, url: String?, cssClass: String): String? {
+        if (url.isNullOrBlank()) return null
+        return """<a class="${escapeHtml(cssClass)}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(label)}</a>"""
+    }
+
+    private fun depsDevUrl(metric: LibMetric): String {
+        val encoded = URLEncoder.encode(metric.id, StandardCharsets.UTF_8)
+        return "https://deps.dev/maven/$encoded"
+    }
+
+    private fun librariesIoUrl(metric: LibMetric): String {
+        val encoded = URLEncoder.encode(metric.id, StandardCharsets.UTF_8)
+        return "https://libraries.io/maven/$encoded"
+    }
+
+    private fun normalizeGithubUrl(scmUrl: String): String? {
+        var url = scmUrl.trim()
+        if (url.isBlank()) return null
+
+        url = url
+            .replace("git@github.com:", "https://github.com/")
+            .replace("git://github.com/", "https://github.com/")
+            .replace("https://github.com/", "https://github.com/")
+            .replace("http://github.com/", "https://github.com/")
+            .replace("git+https://github.com/", "https://github.com/")
+            .replace("git+http://github.com/", "https://github.com/")
+
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "https://$url"
+        }
+
+        return url.removeSuffix(".git")
     }
 
     private fun escapeHtml(input: String): String {

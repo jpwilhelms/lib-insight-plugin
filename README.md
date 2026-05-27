@@ -186,7 +186,7 @@ libInsight {
             level = "WARN"
             filter {
                 def libs = it.librariesIo
-                def artifactId = it.id.substring(it.id.indexOf(':') + 1).toLowerCase()
+                def artifactId = it.artifactId.toLowerCase()
                 def infrastructureArtifact =
                     artifactId == 'bom' ||
                     artifactId.endsWith('-bom') ||

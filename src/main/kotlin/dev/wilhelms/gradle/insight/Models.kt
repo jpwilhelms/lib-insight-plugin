@@ -100,6 +100,8 @@ data class LibMetric(
     val librariesIo: LibrariesIoData?,
     val cachedAt: String
 ) : Serializable {
+    val groupId: String get() = id.substringBefore(':', id)
+    val artifactId: String get() = id.substringAfter(':', id)
     val cacheTime: Instant? get() = try { Instant.parse(cachedAt) } catch(e: Exception) { null }
 }
 

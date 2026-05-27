@@ -25,6 +25,8 @@ This file contains the complete set of metadata collected for every dependency.
 
 **Helper Methods:**
 *   `cacheTime`: Parsed `Instant?` derived from `cachedAt`.
+*   `groupId`: Parsed `String` before the first `:`.
+*   `artifactId`: Parsed `String` after the first `:`.
 
 ---
 
